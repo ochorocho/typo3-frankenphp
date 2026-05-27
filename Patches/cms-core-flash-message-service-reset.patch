@@ -1,0 +1,34 @@
+Add public resetQueues() method to FlashMessageService.
+
+FlashMessageService (SingletonInterface) accumulates flash message
+queues in the protected `$flashMessageQueues` array. Under PHP-FPM
+this state dies with the process. Under long-running runtimes the
+queues persist, causing flash messages from a previous request to
+appear in subsequent requests for unrelated users.
+
+Add a public `resetQueues()` method so the accumulated state can be
+cleared without reaching into protected properties.
+
+This follows the precedent set by PageRenderer, AssetCollector, and
+MetaTagManagerRegistry which already expose public state management
+methods (getState/updateState).
+
+diff --git a/Classes/Messaging/FlashMessageService.php b/Classes/Messaging/FlashMessageService.php
+--- a/Classes/Messaging/FlashMessageService.php
++++ b/Classes/Messaging/FlashMessageService.php
+@@ -48,4 +48,15 @@
+         }
+         return $this->flashMessageQueues[$identifier];
+     }
++
++    /**
++     * Resets all flash message queues.
++     *
++     * Useful for long-running PHP runtimes where the singleton instance
++     * persists across requests and queued messages must not leak.
++     */
++    public function resetQueues(): void
++    {
++        $this->flashMessageQueues = [];
++    }
+ }

@@ -118,11 +118,41 @@ generate_composer_json() {
         "sort-packages": true,
         "vendor-dir": "vendor"
     },
+    "require-dev": {
+        "phpstan/phpstan": "^1.12"
+    },
     "extra": {
       "typo3/cms": { "web-dir": "public" },
+      "enable-patching": true,
+      "composer-exit-on-patch-failure": true,
       "patches": {
           "typo3/cms-core": {
-              "FormProtectionFactory: session-aware cache key for worker-mode safety (https://github.com/ochorocho/typo3-frankenphp)": "../Patches/cms-core-form-protection-factory-session-aware-cache.patch"
+              "FormProtectionFactory: session-aware cache key": "../Patches/cms-core-form-protection-factory-session-aware-cache.patch",
+              "BackendUserAuthentication: user-scoped file mount cache": "../Patches/cms-core-backend-user-auth-scoped-filemount-cache.patch",
+              "FlashMessageService: add resetQueues()": "../Patches/cms-core-flash-message-service-reset.patch",
+              "Registry: add flushInMemoryCache()": "../Patches/cms-core-registry-flush-cache.patch",
+              "MemorySpool: add reset()": "../Patches/cms-core-memory-spool-reset.patch",
+              "DirectiveHashCollection: add reset()": "../Patches/cms-core-csp-directive-hash-collection-reset.patch"
+          },
+          "typo3/cms-backend": {
+              "UriBuilder: add resetGeneratedCache()": "../Patches/cms-backend-uri-builder-reset-generated-cache.patch",
+              "DocHeaderComponent/ButtonBar/MenuRegistry: add resetState()": "../Patches/cms-backend-doc-header-reset.patch",
+              "SystemInformationToolbarItem: add resetCollectedInformation()": "../Patches/cms-backend-system-information-toolbar-reset.patch"
+          },
+          "typo3/cms-extbase": {
+              "Extbase persistence/config singletons: add clearState/clearCache": "../Patches/cms-extbase-persistence-clear-state.patch"
+          },
+          "typo3/cms-workspaces": {
+              "WorkspaceService: user-scoped workspace cache": "../Patches/cms-workspaces-user-scoped-workspace-cache.patch"
+          },
+          "typo3/cms-adminpanel": {
+              "InMemoryLogWriter: add clearLog()": "../Patches/cms-adminpanel-in-memory-log-writer-reset.patch"
+          },
+          "typo3/cms-form": {
+              "FilePersistenceSlot/ResourcePublicationSlot: add reset methods": "../Patches/cms-form-slot-reset.patch"
+          },
+          "typo3/cms-frontend": {
+              "MenuContentObjectFactory: add getMenuTypeMapping/setMenuTypeMapping": "../Patches/cms-frontend-menu-factory-reset.patch"
           }
       }
     }

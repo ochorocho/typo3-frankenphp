@@ -1,0 +1,36 @@
+Add resetCollectedInformation() to SystemInformationToolbarItem.
+
+SystemInformationToolbarItem is an #[Autoconfigure(public: true)]
+shared service whose collectInformation() appends to
+$systemInformation[] on every call. After N requests every entry
+appears N times in the toolbar dropdown.
+
+Add a public resetCollectedInformation() method that clears all
+accumulated state back to post-construction defaults.
+
+--- a/Classes/Backend/ToolbarItems/SystemInformationToolbarItem.php
++++ b/Classes/Backend/ToolbarItems/SystemInformationToolbarItem.php
+@@ -52,7 +52,23 @@
+         private readonly Typo3Version $typo3Version,
+         private readonly BackendViewFactory $backendViewFactory,
+     ) {
++        $this->highestSeverity = InformationStatus::INFO;
++    }
++
++    /**
++     * Resets all collected system information and messages to
++     * post-construction defaults.
++     *
++     * Useful for long-running PHP runtimes where this shared service
++     * persists across requests and collected information accumulates.
++     */
++    public function resetCollectedInformation(): void
++    {
++        $this->systemInformation = [];
++        $this->systemMessages = [];
++        $this->systemMessageTotalCount = 0;
+         $this->highestSeverity = InformationStatus::INFO;
++        $this->severityBadgeClass = '';
+     }
+ 
+     public function setRequest(ServerRequestInterface $request): void

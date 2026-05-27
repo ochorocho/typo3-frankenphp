@@ -1,0 +1,81 @@
+Add resetState() methods to DocHeaderComponent, ButtonBar, and MenuRegistry.
+
+These #[Autoconfigure(public: true)] shared services accumulate
+per-request state: ButtonBar::$buttons via addButton(), MenuRegistry::
+$menus via addMenu(), and DocHeaderComponent holds references to both.
+Under PHP-FPM fresh instances are created per request. Under
+long-running runtimes the same instances persist, causing duplicate
+buttons and ghost menu dropdowns after every request.
+
+Add public resetState() methods following the precedent of
+PageRenderer/AssetCollector/MetaTagManagerRegistry getState/updateState.
+
+--- a/Classes/Template/Components/ButtonBar.php
++++ b/Classes/Template/Components/ButtonBar.php
+@@ -137,6 +137,17 @@
+      */
+     protected array $buttons = [];
+ 
++    /**
++     * Clears all registered buttons.
++     *
++     * Useful for long-running PHP runtimes where this shared service
++     * persists across requests and buttons must not accumulate.
++     */
++    public function resetState(): void
++    {
++        $this->buttons = [];
++    }
++
+     public function __construct(
+         protected readonly ComponentFactory $componentFactory,
+         protected readonly EventDispatcherInterface $eventDispatcher,
+
+--- a/Classes/Template/Components/MenuRegistry.php
++++ b/Classes/Template/Components/MenuRegistry.php
+@@ -66,6 +66,17 @@
+     protected array $menus = [];
+ 
+     /**
++     * Clears all registered menus.
++     *
++     * Useful for long-running PHP runtimes where this shared service
++     * persists across requests and menus must not accumulate.
++     */
++    public function resetState(): void
++    {
++        $this->menus = [];
++    }
++
++    /**
+      * Adds a menu to the registry
+      *
+      * @throws \InvalidArgumentException In case a menu is not valid
+
+--- a/Classes/Template/Components/DocHeaderComponent.php
++++ b/Classes/Template/Components/DocHeaderComponent.php
+@@ -119,6 +119,24 @@
+         $this->buttonBar = GeneralUtility::makeInstance(ButtonBar::class);
+         $this->metaInformation = GeneralUtility::makeInstance(MetaInformation::class);
+         $this->breadcrumb = GeneralUtility::makeInstance(Breadcrumb::class);
++    }
++
++    /**
++     * Resets all mutable state to post-construction defaults.
++     *
++     * Useful for long-running PHP runtimes where this shared service
++     * persists across requests and accumulated state (buttons, menus,
++     * breadcrumbs) must not leak between requests.
++     */
++    public function resetState(): void
++    {
++        $this->buttonBar = GeneralUtility::makeInstance(ButtonBar::class);
++        $this->breadcrumbContext = null;
++        $this->enabled = true;
++        $this->languageSelector = null;
++        $this->automaticShortcutButton = null;
++        $this->automaticReloadButton = true;
++        $this->menuRegistry->resetState();
+     }
+ 
+     /**

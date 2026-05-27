@@ -1,0 +1,36 @@
+Add public flushInMemoryCache() method to Registry.
+
+Registry (SingletonInterface) caches `sys_registry` database rows in
+the `$entries` array, with `$loadedNamespaces` tracking which
+namespaces have been hydrated from DB. Under PHP-FPM the cache dies
+with the process, so an out-of-band write to sys_registry (scheduler
+task, other worker, install-tool maintenance action) is visible on
+the next request. Under long-running runtimes the cache persists,
+so subsequent requests keep returning pre-write values for feature
+flags, install-tool locks, schema versions, etc.
+
+Add a public `flushInMemoryCache()` method so the in-memory cache
+can be cleared without reaching into protected properties. The next
+`get()` call will reload the namespace from the database.
+
+diff --git a/Classes/Registry.php b/Classes/Registry.php
+--- a/Classes/Registry.php
++++ b/Classes/Registry.php
+@@ -187,4 +187,17 @@
+             throw new \InvalidArgumentException('Given namespace must be longer than two characters.', 1249755131);
+         }
+     }
++
++    /**
++     * Flushes the in-memory cache of registry entries.
++     *
++     * The next get() call will reload the namespace from the database.
++     * Useful for long-running PHP runtimes where the singleton instance
++     * persists across requests and cached values may become stale.
++     */
++    public function flushInMemoryCache(): void
++    {
++        $this->entries = [];
++        $this->loadedNamespaces = [];
++    }
+ }

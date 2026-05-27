@@ -1,0 +1,34 @@
+Scope file mount cache per user to prevent cross-user data exposure.
+
+Under long-running PHP runtimes (FrankenPHP worker mode, RoadRunner,
+ReactPHP, ...) cache.runtime survives across requests. The
+backendUserAuthenticationFileMountRecords cache key has no user
+parameterization, so user A's file mounts are served to user B.
+
+Include the user UID in the cache key so each backend user gets
+their own cached file mount set. Under PHP-FPM nothing changes
+(the runtime cache dies with the process).
+
+--- a/Classes/Authentication/BackendUserAuthentication.php
++++ b/Classes/Authentication/BackendUserAuthentication.php
+@@ -1330,7 +1330,10 @@
+     public function getFileMountRecords()
+     {
+         $runtimeCache = GeneralUtility::makeInstance(CacheManager::class)->getCache('runtime');
+-        $fileMountRecordCache = $runtimeCache->get('backendUserAuthenticationFileMountRecords') ?: [];
++        // Include user UID in the cache key to prevent cross-user data
++        // exposure when the runtime cache survives across requests.
++        $cacheKey = 'backendUserAuthenticationFileMountRecords-' . (int)($this->user['uid'] ?? 0);
++        $fileMountRecordCache = $runtimeCache->get($cacheKey) ?: [];
+ 
+         if (!empty($fileMountRecordCache)) {
+             return $fileMountRecordCache;
+@@ -1471,7 +1474,7 @@
+             }
+         }
+ 
+-        $runtimeCache->set('backendUserAuthenticationFileMountRecords', $fileMountRecordCache);
++        $runtimeCache->set($cacheKey, $fileMountRecordCache);
+         return $fileMountRecordCache;
+     }
+ 

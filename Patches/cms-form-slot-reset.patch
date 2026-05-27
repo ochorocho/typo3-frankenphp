@@ -1,0 +1,51 @@
+Add state reset methods to form extension slot singletons.
+
+FilePersistenceSlot and ResourcePublicationSlot are SingletonInterface
+services that accumulate per-request state. Under long-running
+runtimes FilePersistenceSlot's whitelisted file operations and
+ResourcePublicationSlot's tracked file identifiers leak between
+requests — the former is a cross-user security issue.
+
+Add public methods to clear the accumulated state.
+
+--- a/Classes/Slot/FilePersistenceSlot.php
++++ b/Classes/Slot/FilePersistenceSlot.php
+@@ -47,6 +47,17 @@
+ 
+     public function __construct(private readonly HashService $hashService) {}
+ 
++    /**
++     * Clears all allowed file operation invocations.
++     *
++     * Useful for long-running PHP runtimes where the singleton persists
++     * across requests and whitelisted operations must not leak.
++     */
++    public function clearAllowedInvocations(): void
++    {
++        $this->allowedInvocations = [];
++    }
++
+     public function getContentSignature(string $content): string
+     {
+         return $this->hashService->hmac($content, self::class);
+
+--- a/Classes/Slot/ResourcePublicationSlot.php
++++ b/Classes/Slot/ResourcePublicationSlot.php
+@@ -44,6 +44,17 @@
+ 
+     public function __construct(private readonly HashService $hashService) {}
+ 
++    /**
++     * Clears all tracked file identifiers.
++     *
++     * Useful for long-running PHP runtimes where the singleton persists
++     * across requests and file identifiers must not leak.
++     */
++    public function clearFileIdentifiers(): void
++    {
++        $this->fileIdentifiers = [];
++    }
++
+     #[AsEventListener('form-framework/resource-getPublicUrl')]
+     public function getPublicUrl(GeneratePublicUrlForResourceEvent $event): void
+     {

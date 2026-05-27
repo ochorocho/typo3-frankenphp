@@ -1,0 +1,30 @@
+Add public clearLog() method to InMemoryLogWriter.
+
+InMemoryLogWriter (SingletonInterface) accumulates LogRecords in
+memory. Under long-running runtimes user B sees user A's debug
+output — a cross-user information disclosure.
+
+Add a public clearLog() method to clear accumulated entries and
+release the memory lock.
+
+--- a/Classes/Log/InMemoryLogWriter.php
++++ b/Classes/Log/InMemoryLogWriter.php
+@@ -74,6 +74,18 @@
+     }
+ 
+     /**
++     * Clears all accumulated log entries and releases the memory lock.
++     *
++     * Useful for long-running PHP runtimes where the singleton persists
++     * across requests and log entries must not leak between requests.
++     */
++    public function clearLog(): void
++    {
++        $this->log = [];
++        $this->memoryLock = false;
++    }
++
++    /**
+      * Lock writer and add an info message that there may potentially be more entries.
+      */
+     private function lockWriter(): void

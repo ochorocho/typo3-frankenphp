@@ -1,0 +1,123 @@
+Add clearState/clearCache methods to Extbase singletons.
+
+Several Extbase singletons accumulate per-request state:
+
+- Backend: aggregateRootObjects, deletedEntities, changedEntities,
+  visitedDuringPersistence — populated during persistAll() but never
+  cleared after persist.
+- ConfigurationManager: configuration cache keyed by plugin name
+  leaks across pages rendering the same plugin.
+- CacheService: clearCacheForTables and cacheTagStack can carry
+  leftover scope from requests that threw before consuming the stack.
+- ValidatorResolver: baseValidatorConjunctions caches validators
+  per model class indefinitely.
+
+Add public clearState()/clearCache() methods and expand
+PersistenceManager::clearState() to also reset the Backend.
+
+--- a/Classes/Persistence/Generic/Backend.php
++++ b/Classes/Persistence/Generic/Backend.php
+@@ -86,6 +86,21 @@
+         $this->changedEntities = new ObjectStorage();
+     }
+ 
++    /**
++     * Clears all accumulated persistence state.
++     *
++     * Resets the aggregate root objects, deleted/changed entities, and
++     * the visited-during-persistence tracking set. Useful for long-running
++     * PHP runtimes where the singleton persists across requests.
++     */
++    public function clearState(): void
++    {
++        $this->aggregateRootObjects = new ObjectStorage();
++        $this->deletedEntities = new ObjectStorage();
++        $this->changedEntities = new ObjectStorage();
++        $this->visitedDuringPersistence = new ObjectStorage();
++    }
++
+     public function setPersistenceManager(PersistenceManagerInterface $persistenceManager): void
+     {
+         $this->persistenceManager = $persistenceManager;
+
+--- a/Classes/Persistence/Generic/PersistenceManager.php
++++ b/Classes/Persistence/Generic/PersistenceManager.php
+@@ -209,6 +209,7 @@
+         $this->removedObjects = new ObjectStorage();
+         $this->changedObjects = new ObjectStorage();
+         $this->persistenceSession->destroy();
++        $this->backend->clearState();
+     }
+ 
+     /**
+
+--- a/Classes/Configuration/ConfigurationManager.php
++++ b/Classes/Configuration/ConfigurationManager.php
+@@ -54,6 +54,20 @@
+     }
+ 
+     /**
++     * Clears the in-memory configuration cache.
++     *
++     * Forces re-evaluation of plugin TypoScript configuration on the
++     * next getConfiguration() call. Useful for long-running PHP runtimes
++     * where the singleton persists across requests and cached settings
++     * from one page must not leak to another.
++     */
++    public function clearCache(): void
++    {
++        $this->configuration = [];
++        $this->feConfigCache = [];
++    }
++
++    /**
+      * Returns the specified configuration.
+      * The actual configuration will be merged from different sources in a defined order.
+      *
+
+--- a/Classes/Service/CacheService.php
++++ b/Classes/Service/CacheService.php
+@@ -43,6 +43,20 @@
+         $this->cacheTagStack = new \SplStack();
+     }
+ 
++    /**
++     * Clears all accumulated cache invalidation state.
++     *
++     * Resets the table-to-uid mapping and the cache tag stack.
++     * Useful for long-running PHP runtimes where the singleton persists
++     * across requests and leftover stack entries from a previous request
++     * must not leak into the next request.
++     */
++    public function clearState(): void
++    {
++        $this->clearCacheForTables = [];
++        $this->cacheTagStack = new \SplStack();
++    }
++
+     public function getCacheTagStack(): \SplStack
+     {
+         return $this->cacheTagStack;
+
+--- a/Classes/Validation/ValidatorResolver.php
++++ b/Classes/Validation/ValidatorResolver.php
+@@ -43,6 +43,19 @@
+     public function __construct(protected readonly ReflectionService $reflectionService) {}
+ 
+     /**
++     * Clears the validator conjunction cache.
++     *
++     * Forces rebuild of all validator conjunctions from the current
++     * set of registrations on next access. Useful for long-running
++     * PHP runtimes where extensions may register dynamic validators
++     * per request.
++     */
++    public function clearCache(): void
++    {
++        $this->baseValidatorConjunctions = [];
++    }
++
++    /**
+      * Get a validator for a given data type. Returns a validator implementing
+      * the ValidatorInterface or NULL if no validator could be resolved.
+      *

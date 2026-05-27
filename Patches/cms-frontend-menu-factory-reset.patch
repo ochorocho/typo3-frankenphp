@@ -1,0 +1,41 @@
+Add state management methods to MenuContentObjectFactory.
+
+MenuContentObjectFactory (SingletonInterface) holds the TMENU type
+to class-string mapping. Extensions can mutate via registerMenuType()
+at runtime. Under long-running runtimes a mid-request mutation from
+one request permanently overrides another request's menu rendering.
+
+Add getMenuTypeMapping()/setMenuTypeMapping() so the mapping can be
+snapshotted at boot and restored per request, following the precedent
+of PageRenderer::getState()/updateState().
+
+--- a/Classes/ContentObject/Menu/MenuContentObjectFactory.php
++++ b/Classes/ContentObject/Menu/MenuContentObjectFactory.php
+@@ -65,4 +65,27 @@
+     {
+         $this->menuTypeToClassMapping[strtoupper($type)] = $className;
+     }
++
++    /**
++     * Returns the current menu type to class mapping.
++     *
++     * Useful for snapshotting the boot-time state so it can be
++     * restored per request in long-running PHP runtimes.
++     *
++     * @return array<string, class-string>
++     */
++    public function getMenuTypeMapping(): array
++    {
++        return $this->menuTypeToClassMapping;
++    }
++
++    /**
++     * Replaces the menu type to class mapping.
++     *
++     * @param array<string, class-string> $mapping
++     */
++    public function setMenuTypeMapping(array $mapping): void
++    {
++        $this->menuTypeToClassMapping = $mapping;
++    }
+ }

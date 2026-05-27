@@ -1,0 +1,24 @@
+Scope workspace availability cache per user to prevent permission leakage.
+
+Under long-running PHP runtimes (FrankenPHP worker mode, RoadRunner,
+ReactPHP, ...) cache.runtime survives across requests. The
+workspace-service-available-workspaces cache key has no user
+parameterization, so user A populates the cache and user B sees
+workspaces they lack permission for.
+
+Include the backend user UID in the cache key. Under PHP-FPM
+nothing changes (the runtime cache dies with the process).
+
+--- a/Classes/Service/WorkspaceService.php
++++ b/Classes/Service/WorkspaceService.php
+@@ -107,7 +107,9 @@
+      */
+     public function getAvailableWorkspaces(bool $includeWorkspaceData = false): array
+     {
+-        $cacheId = 'workspace-service-available-workspaces' . ($includeWorkspaceData ? '-detailed' : '');
++        // Include user UID in the cache key to prevent cross-user
++        // permission leakage when the runtime cache survives across requests.
++        $cacheId = 'workspace-service-available-workspaces-' . (int)($this->getBackendUser()->user['uid'] ?? 0) . ($includeWorkspaceData ? '-detailed' : '');
+         $cached = $this->runtimeCache->get($cacheId);
+         if ($cached !== false) {
+             return $cached;

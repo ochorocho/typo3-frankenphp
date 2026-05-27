@@ -1,0 +1,28 @@
+Add public reset() method to MemorySpool.
+
+MemorySpool (SingletonInterface) queues emails in memory, flushed
+via __destruct() which fires only at process death. Under
+long-running runtimes this means emails queue indefinitely and may
+flush mid-way through an unrelated request.
+
+Add a public reset() method to discard queued messages without
+sending them, giving callers a controlled cleanup point.
+
+--- a/Classes/Mail/MemorySpool.php
++++ b/Classes/Mail/MemorySpool.php
+@@ -123,4 +123,15 @@
+     {
+         return 'MemorySpool';
+     }
++
++    /**
++     * Discards all queued messages without sending them.
++     *
++     * Useful for long-running PHP runtimes where the singleton survives
++     * across requests and queued messages must not leak between requests.
++     */
++    public function reset(): void
++    {
++        $this->queuedMessages = [];
++    }
+ }

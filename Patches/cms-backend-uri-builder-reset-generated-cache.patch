@@ -1,0 +1,32 @@
+Add public method to reset the URI generation cache.
+
+UriBuilder (SingletonInterface) caches generated URIs keyed by
+route+parameters+referenceType. The cache key is computed before
+the CSRF token is injected, so cached URIs carry stale tokens from
+previous sessions. Under PHP-FPM this dies with the process; under
+long-running runtimes it causes token validation failures and
+redirect loops.
+
+Add a public resetGeneratedCache() method so the per-request URI
+cache can be cleared without reaching into protected state.
+
+--- a/Classes/Routing/UriBuilder.php
++++ b/Classes/Routing/UriBuilder.php
+@@ -75,6 +75,17 @@
+     ) {}
+ 
+     /**
++     * Clears the in-memory URI generation cache.
++     *
++     * Useful for long-running PHP runtimes where the singleton instance
++     * persists across requests and cached URIs may carry stale CSRF tokens.
++     */
++    public function resetGeneratedCache(): void
++    {
++        $this->generated = [];
++    }
++
++    /**
+      * @internal
+      */
+     public function setRequestContext(RequestContext $requestContext): void

@@ -1,0 +1,35 @@
+Add public reset() method to DirectiveHashCollection.
+
+DirectiveHashCollection accumulates CSP hash values for inline and
+static assets. Under long-running runtimes the same instance
+persists, causing unbounded CSP header growth and information
+disclosure as hash values from previous responses leak.
+
+Add a public reset() method to clear all accumulated hash values
+back to the initial empty state.
+
+--- a/Classes/Security/ContentSecurityPolicy/DirectiveHashCollection.php
++++ b/Classes/Security/ContentSecurityPolicy/DirectiveHashCollection.php
+@@ -50,6 +50,22 @@
+     public function __construct(private readonly ResourceHashCollection $resourceHashCollection) {}
+ 
+     /**
++     * Clears all accumulated hash values back to the initial empty state.
++     *
++     * Useful for long-running PHP runtimes where this shared service
++     * persists across requests and hash values must not leak.
++     */
++    public function reset(): void
++    {
++        $this->hashValues = [
++            'inline' => [],
++            'resource' => [],
++            'uri' => [],
++            'generic' => [],
++        ];
++    }
++
++    /**
+      * Computes a SHA-256 hash of the given inline content and stores it for the directive.
+      */
+     public function addInlineHash(Directive $directive, string $content): void
