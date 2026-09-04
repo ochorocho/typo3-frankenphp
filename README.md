@@ -66,9 +66,16 @@ vendor/bin/typo3 frankenphp:audit --summary  # counts and the top demotion cause
 vendor/bin/typo3 frankenphp:audit --format=markdown --filter=Extbase
 ```
 
-Run it inside a TYPO3 installation (in this repository that is the `Build/` sandbox, not the root: the root
-`vendor/` only holds the extension's dev dependencies). The classification is computed when the DI container is
-compiled, so flush caches after changing `KeepList` or service tags.
+Run it inside a TYPO3 installation. In this repository that is the `Build/` sandbox, not the root (the root `vendor/`
+only holds the extension's dev dependencies, so the root `vendor/bin/typo3` fails with "`vendor/typo3/sysext/*/`
+does not exist"). `scripts/typo3` runs the sandbox CLI from anywhere:
+
+```bash
+scripts/typo3 frankenphp:audit --summary
+```
+
+The classification is computed when the DI container is compiled, so flush caches (`scripts/typo3 cache:flush`)
+after changing `KeepList` or service tags.
 
 Worker mode is discard-by-default: every DI service instance that is not provably stateless (or explicitly pinned)
 is dropped at the start of each request and rebuilt lazily by the compiled container. The audit prints the
@@ -148,7 +155,7 @@ This repository is the **extension package**, not a TYPO3 installation. A throwa
 | `Resources/Public/`  | Frontend assets — `JavaScript/widget/` (Chart.js-backed Lit web component for the metrics widget), `Css/widget/`, `Icons/`.                                                                                                                                                                                                                                 |
 | `Tests/`             | `Unit/` PHPUnit tests for the compiler pass, `e2e/` Playwright suite (correctness) and `load/` k6 scenarios (performance + worker stability). Each has its own README.                                                                                                                                                                                       |
 | `Documentation/`     | `WorkerMode.md` — the service lifecycle model and the audited list of Core services for worker mode.                                                                                                                                                                                                                                                       |
-| `scripts/`           | Developer bootstrap — `setup-typo3.sh` materializes the `Build/` sandbox.                                                                                                                                                                                                                                                                                   |
+| `scripts/`           | Developer bootstrap — `setup-typo3.sh` materializes the `Build/` sandbox; `typo3` runs the sandbox CLI from the repo root.                                                                                                                                                                                                                                                                                   |
 | `Build/`             | **Gitignored.** Throwaway TYPO3 install for development. `Build/composer.json` requires this extension via a Composer path repository pointing at `../`, so edits to root `Classes/` / `Resources/` / `Configuration/` affect the sandbox immediately.                                                                                                      |
 
 ## Contributing

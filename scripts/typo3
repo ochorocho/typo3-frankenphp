@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Run the TYPO3 CLI of the Build/ sandbox from the repository root.
+#
+# The root vendor/ only holds the extension's dev dependencies: there is no
+# TYPO3 installation, typo3/cms-composer-installers is disabled on purpose,
+# and the root vendor/bin/typo3 dies with "vendor/typo3/sysext/*/ does not
+# exist". Every TYPO3 command (frankenphp:audit, frankenphp:init,
+# cache:flush, ...) has to run inside Build/.
+#
+#   scripts/typo3 frankenphp:audit --summary
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TYPO3="${ROOT}/Build/vendor/bin/typo3"
+
+if [ ! -x "${TYPO3}" ]; then
+    echo "No TYPO3 sandbox in Build/ — run scripts/setup-typo3.sh first." >&2
+    exit 1
+fi
+
+cd "${ROOT}/Build"
+exec vendor/bin/typo3 "$@"
