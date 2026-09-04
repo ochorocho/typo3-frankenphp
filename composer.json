@@ -5,8 +5,7 @@
     "license": "GPL-2.0-or-later",
     "require": {
         "typo3/cms-core": "^14.3 || 15.*@dev",
-        "helhum/dotenv-connector": "^3.2",
-        "cweagans/composer-patches": "^1.7"
+        "helhum/dotenv-connector": "^3.2"
     },
     "require-dev": {
         "composer/composer": "^2.7",
@@ -42,8 +41,7 @@
         "allow-plugins": {
             "typo3/cms-composer-installers": false,
             "typo3/class-alias-loader": true,
-            "helhum/dotenv-connector": true,
-            "cweagans/composer-patches": true
+            "helhum/dotenv-connector": true
         }
     }
 }
