@@ -20,6 +20,7 @@ use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\RequestIdConsum
 use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\SecondHolderOfPrototype;
 use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\StatelessReadonly;
 use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\StaticStateService;
+use Ochorocho\FrankenPhp\Worker\WorkerConfiguration;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\DependencyInjection\Argument\IteratorArgument;
@@ -66,6 +67,13 @@ final class WorkerKeepListPassTest extends TestCase
         $this->register($builder, 'cache.fixture', [], \ArrayObject::class);
         $this->register($builder, 'tagged.keep', [], MutableService::class)->addTag(WorkerKeepListPass::TAG_KEEP);
         $this->register($builder, 'tagged.discard', [], StatelessReadonly::class)->addTag(WorkerKeepListPass::TAG_DISCARD);
+        // Entries a package's Configuration/FrankenPhpWorker.php would contribute.
+        $this->register($builder, 'config.discard', [], StatelessReadonly::class);
+        $this->register($builder, 'config.keep', [], MutableService::class);
+        $this->register($builder, 'config.keep.denied', [], MutableService::class)->addTag(WorkerKeepListPass::TAG_DISCARD);
+        $this->register($builder, 'config.pin.root', [new Reference(PinnedDependency::class)], PinnedRoot::class);
+        $this->register($builder, 'config.pin.denied', [], StatelessReadonly::class)->addTag(WorkerKeepListPass::TAG_DISCARD);
+        $this->register($builder, 'vendor.ext.legacy.thing', [], StatelessReadonly::class);
 
         $builder->addCompilerPass(
             new WorkerKeepListPass(
@@ -74,6 +82,12 @@ final class WorkerKeepListPassTest extends TestCase
                 discardServices: [],
                 discardPatterns: [],
                 keepIdPatterns: ['/^cache\./' => 'cache-frontend'],
+                configuration: new WorkerConfiguration(
+                    pinned: ['config.pin.root' => 'ext_a', 'config.pin.denied' => 'ext_a'],
+                    keep: ['config.keep' => 'ext_a', 'config.keep.denied' => 'ext_a'],
+                    discard: ['config.discard' => 'ext_a', 'does.not.exist' => 'ext_a'],
+                    discardPatterns: ['/^vendor\.ext\./' => 'ext_b'],
+                ),
             ),
             PassConfig::TYPE_AFTER_REMOVING,
             -1024
@@ -215,5 +229,54 @@ final class WorkerKeepListPassTest extends TestCase
     public function syntheticServicesAreNotClassified(): void
     {
         self::assertArrayNotHasKey(WorkerKeepListPass::REQUEST_ID_SERVICE, $this->report);
+    }
+
+    #[Test]
+    public function configurationDiscardOverridesIntrinsicKeepAndNamesItsOrigin(): void
+    {
+        self::assertNotContains('config.discard', $this->keep);
+        self::assertSame('config:ext_a', $this->report['config.discard']['reason']);
+    }
+
+    #[Test]
+    public function configurationKeepOverridesIntrinsicDiscardAndNamesItsOrigin(): void
+    {
+        self::assertContains('config.keep', $this->keep);
+        self::assertSame('config:ext_a', $this->report['config.keep']['reason']);
+    }
+
+    #[Test]
+    public function explicitDiscardWinsOverConfigurationKeep(): void
+    {
+        self::assertNotContains('config.keep.denied', $this->keep);
+        self::assertSame('tag', $this->report['config.keep.denied']['reason']);
+    }
+
+    #[Test]
+    public function explicitDiscardWinsOverConfigurationPin(): void
+    {
+        self::assertNotContains('config.pin.denied', $this->keep);
+        self::assertSame('tag', $this->report['config.pin.denied']['reason']);
+    }
+
+    #[Test]
+    public function configurationPinNamesItsOriginAndPinsTheClosure(): void
+    {
+        self::assertContains('config.pin.root', $this->keep);
+        self::assertSame('pinned:config:ext_a', $this->report['config.pin.root']['reason']);
+        self::assertContains(PinnedDependency::class, $this->keep);
+    }
+
+    #[Test]
+    public function configurationDiscardPatternNamesItsOrigin(): void
+    {
+        self::assertNotContains('vendor.ext.legacy.thing', $this->keep);
+        self::assertSame('pattern:config:ext_b', $this->report['vendor.ext.legacy.thing']['reason']);
+    }
+
+    #[Test]
+    public function configurationEntriesWithoutServiceAreIgnored(): void
+    {
+        self::assertArrayNotHasKey('does.not.exist', $this->report);
     }
 }

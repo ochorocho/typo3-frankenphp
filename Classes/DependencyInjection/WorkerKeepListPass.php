@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Ochorocho\FrankenPhp\DependencyInjection;
 
 use Ochorocho\FrankenPhp\Worker\KeepList;
+use Ochorocho\FrankenPhp\Worker\WorkerConfiguration;
 use Symfony\Component\DependencyInjection\Argument\ArgumentInterface;
 use Symfony\Component\DependencyInjection\Argument\RewindableGenerator;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
@@ -23,8 +24,9 @@ use TYPO3\CMS\Core\Log\Logger;
  *  1. Intrinsic: readonly classes and classes whose instance properties are
  *     all readonly are kept; everything with mutable properties, opaque
  *     factory return types or unloadable classes is discarded.
- *  2. Curated overrides from KeepList and the `frankenphp.keep` /
- *     `frankenphp.discard` tags.
+ *  2. Overrides from KeepList, the `frankenphp.keep` / `frankenphp.discard`
+ *     tags and the packages' Configuration/FrankenPhpWorker.php files. An
+ *     explicit discard from any of these sources wins over a keep or pin.
  *  3. Dependency closure: a kept service that (transitively, via
  *     constructor / inject-method / property references) holds a discarded
  *     service, a non-shared service or the per-request RequestId is demoted
@@ -72,6 +74,14 @@ final class WorkerKeepListPass implements CompilerPassInterface
     private array $pinned = [];
 
     /**
+     * Reason prefixes of explicit discard decisions, as opposed to the
+     * intrinsic analysis. Only these block a keep request or a pin chain.
+     *
+     * @var list<string>
+     */
+    private const array EXPLICIT_DISCARD_REASONS = ['curated', 'tag', 'pattern', 'config'];
+
+    /**
      * @param list<string> $pinnedServices
      * @param list<string> $softServices
      * @param list<string> $discardServices
@@ -85,6 +95,7 @@ final class WorkerKeepListPass implements CompilerPassInterface
         private readonly array $discardServices = KeepList::DISCARD,
         private readonly array $discardPatterns = KeepList::DISCARD_PATTERNS,
         private readonly array $keepIdPatterns = KeepList::KEEP_ID_PATTERNS,
+        private readonly WorkerConfiguration $configuration = new WorkerConfiguration(),
     ) {}
 
     public function process(ContainerBuilder $container): void
@@ -149,12 +160,20 @@ final class WorkerKeepListPass implements CompilerPassInterface
         foreach ($container->findTaggedServiceIds(self::TAG_DISCARD) as $id => $_) {
             $this->override($container, $id, self::CATEGORY_DISCARD, 'tag');
         }
+        foreach ($this->configuration->discard as $name => $origin) {
+            $this->override($container, $name, self::CATEGORY_DISCARD, 'config:' . $origin);
+        }
+
+        $patterns = array_fill_keys($this->discardPatterns, 'pattern');
+        foreach ($this->configuration->discardPatterns as $pattern => $origin) {
+            $patterns[$pattern] = 'pattern:config:' . $origin;
+        }
         foreach ($this->report as $id => $entry) {
-            foreach ($this->discardPatterns as $pattern) {
+            foreach ($patterns as $pattern => $reason) {
                 $class = $entry['class'] ?? $id;
                 if (preg_match($pattern, $id) === 1 || preg_match($pattern, $class) === 1) {
                     $this->report[$id]['category'] = self::CATEGORY_DISCARD;
-                    $this->report[$id]['reason'] = 'pattern';
+                    $this->report[$id]['reason'] = $reason;
                     break;
                 }
             }
@@ -171,9 +190,15 @@ final class WorkerKeepListPass implements CompilerPassInterface
                 $this->override($container, $id, self::CATEGORY_KEEP, 'tag');
             }
         }
+        foreach ($this->configuration->keep as $name => $origin) {
+            $this->override($container, $name, self::CATEGORY_KEEP, 'config:' . $origin);
+        }
 
         foreach ([...$this->pinnedServices, ...$tagPinned] as $name) {
-            $this->pin($container, $graph, $this->resolveId($container, $name));
+            $this->pin($container, $graph, $this->resolveId($container, $name), 'pinned');
+        }
+        foreach ($this->configuration->pinned as $name => $origin) {
+            $this->pin($container, $graph, $this->resolveId($container, $name), 'pinned:config:' . $origin);
         }
     }
 
@@ -183,16 +208,27 @@ final class WorkerKeepListPass implements CompilerPassInterface
         if (!isset($this->report[$id])) {
             return;
         }
+        if ($category === self::CATEGORY_KEEP && $this->isExplicitlyDiscarded($id)) {
+            return;
+        }
         $this->report[$id]['category'] = $category;
         $this->report[$id]['reason'] = $reason;
+    }
+
+    private function isExplicitlyDiscarded(string $id): bool
+    {
+        $entry = $this->report[$id] ?? null;
+        return $entry !== null
+            && $entry['category'] === self::CATEGORY_DISCARD
+            && in_array(explode(':', $entry['reason'], 2)[0], self::EXPLICIT_DISCARD_REASONS, true);
     }
 
     /**
      * Pins a root and its whole dependency closure, or records a pin conflict.
      */
-    private function pin(ContainerBuilder $container, ServiceReferenceGraph $graph, string $root): void
+    private function pin(ContainerBuilder $container, ServiceReferenceGraph $graph, string $root, string $rootReason): void
     {
-        if (!isset($this->report[$root])) {
+        if (!isset($this->report[$root]) || $this->isExplicitlyDiscarded($root)) {
             return;
         }
         $closure = [];
@@ -225,7 +261,7 @@ final class WorkerKeepListPass implements CompilerPassInterface
             }
             $this->pinned[$id] = true;
             $this->report[$id]['category'] = self::CATEGORY_KEEP;
-            $this->report[$id]['reason'] = $id === $root ? 'pinned' : 'pinned-via:' . $root;
+            $this->report[$id]['reason'] = $id === $root ? $rootReason : 'pinned-via:' . $root;
             // Instances collected through iterators / locators are invisible
             // to the closure check; flag them so the audit reader looks twice.
             if ($this->holdsLazyCollection($container->getDefinition($id))) {
@@ -249,11 +285,7 @@ final class WorkerKeepListPass implements CompilerPassInterface
         if (!$definition->isShared()) {
             return 'non-shared';
         }
-        $entry = $this->report[$dependency] ?? null;
-        if ($entry !== null
-            && $entry['category'] === self::CATEGORY_DISCARD
-            && in_array($entry['reason'], ['curated', 'tag', 'pattern'], true)
-        ) {
+        if ($this->isExplicitlyDiscarded($dependency)) {
             return 'explicit-discard';
         }
         return null;
