@@ -18,14 +18,14 @@ rotation, keep hooks, selective container wipe, `PageRenderer` re-seed.
 **Success Criteria**: Playwright chromium suite green incl. `csp-nonce-uniqueness`;
 k6 soak scenarios pass; discarded count stable across requests.
 **Tests**: existing e2e + un-fixme'd CSP nonce spec
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Full cache.runtime flush, Core patch removal
 **Goal**: `cache.runtime->flush()` per request replaces the 8-key denylist; drop
 `Patches/` and the manual composer patch step.
 **Success Criteria**: login/re-login/page-tree specs green on pristine cms-core.
 **Tests**: `form-token-after-relogin`, `worker-state-isolation`, `iframe-nesting-guard`
-**Status**: Not Started
+**Status**: In Progress
 
 ## Stage 4: Curate keep-list, static-leak shims, new e2e
 **Goal**: Zero demoted PINNED entries in the audit; static Core leaks shimmed with
