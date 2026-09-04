@@ -23,7 +23,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { CONFIG, FRONTEND_PATHS, randomFrontendPath, REQUEST_PARAMS, WARMUP_REQUEST_PARAMS } from '../lib/config.js';
 import { defaultThresholds } from '../lib/thresholds.js';
-import { okStatus, looksLikeCaminoPage, noPHPError } from '../lib/checks.js';
+import { okStatus, looksLikeCaminoPage, noPHPError, noDuplicateAssets } from '../lib/checks.js';
 
 export const options = {
     insecureSkipTLSVerify: true,
@@ -57,6 +57,6 @@ export function setup() {
 
 export default function () {
     const res = http.get(`${CONFIG.baseUrl}${randomFrontendPath()}`, REQUEST_PARAMS);
-    check(res, { ...okStatus, ...looksLikeCaminoPage, ...noPHPError });
+    check(res, { ...okStatus, ...looksLikeCaminoPage, ...noPHPError, ...noDuplicateAssets });
     sleep(1);
 }

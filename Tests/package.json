@@ -21,6 +21,7 @@
     "load:backend:smoke": "k6 run load/scenarios/backend-smoke.js",
     "load:backend:soak": "k6 run load/scenarios/backend-soak.js",
     "load:backend:recycle": "k6 run load/scenarios/backend-recycle.js",
+    "load:backend:multiuser": "k6 run load/scenarios/backend-multiuser.js",
     "load:install-tool": "k6 run load/scenarios/install-tool-load.js",
     "load:install-tool:smoke": "k6 run load/scenarios/install-tool-smoke.js",
     "load:mixed": "k6 run load/scenarios/mixed-workload.js"

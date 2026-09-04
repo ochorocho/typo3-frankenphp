@@ -43,7 +43,7 @@ export const BACKEND_REQUEST_PARAMS = {
  * cache the success per-VU via globalThis if you want to amortize the
  * cost across iterations (see `loginOncePerVU` below).
  */
-export function login() {
+export function login(user = CONFIG.user, pass = CONFIG.pass) {
     const loginUrl = `${CONFIG.baseUrl}/typo3/login`;
 
     const get = http.get(loginUrl, REQUEST_PARAMS);
@@ -63,8 +63,8 @@ export function login() {
     const post = http.post(
         loginUrl,
         {
-            username: CONFIG.user,
-            userident: CONFIG.pass,
+            username: user,
+            userident: pass,
             login_status: 'login',
             __RequestToken: token,
         },
@@ -141,14 +141,33 @@ function restoreCookies(snapshot) {
     }
 }
 
-export function loginOncePerVU() {
+export function loginOncePerVU(user = CONFIG.user, pass = CONFIG.pass) {
     if (cachedSessionCookies !== null) {
         restoreCookies(cachedSessionCookies);
         return true;
     }
-    const ok = login();
+    const ok = login(user, pass);
     if (ok) {
         cachedSessionCookies = captureCookies();
     }
     return ok;
+}
+
+/**
+ * Backend module routes require a per-session route token (`?token=…`,
+ * see TYPO3\CMS\Backend\Http\RouteDispatcher). A tokenless GET on
+ * `/typo3/module/...` is redirected to `/typo3/login`, which k6 follows —
+ * and a 200 login page passes `okStatus` / `noPHPError` vacuously. Harvest
+ * the tokenised link from the module menu of a `/typo3/main` response
+ * instead. Returns null when the current user has no access to the module
+ * (the link is simply not rendered).
+ */
+export function moduleUrl(mainBody, routePath, query = '') {
+    if (typeof mainBody !== 'string') return null;
+    const re = new RegExp('href="([^"]*' + routePath.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') + '\\?token=[^"]+)"');
+    const m = re.exec(mainBody);
+    if (!m) return null;
+    const href = m[1].replace(/&amp;/g, '&');
+    const url = href.startsWith('http') ? href : `${CONFIG.baseUrl}${href}`;
+    return query ? `${url}&${query}` : url;
 }

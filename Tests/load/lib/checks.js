@@ -82,3 +82,38 @@ export const looksLikeBackend = {
         return isShell && !isLogin;
     },
 };
+
+// A backend MODULE response (not the shell): ModuleTemplate wraps every
+// module in `<div class="module …">`. The login page has neither.
+export const looksLikeModule = {
+    'response is a backend module': (r) =>
+        typeof r.body === 'string'
+        && /class="module[\s"]/.test(r.body)
+        && !/id="t3-login-submit"/.test(r.body),
+};
+
+// PageRenderer, AssetCollector and MetaTagManagerRegistry are replayed from
+// the post-boot snapshot on every worker request. If that replay regresses
+// (or a request-scoped asset registration leaks), the same stylesheet,
+// script or meta tag is emitted twice on the next page. No baseline needed:
+// a healthy page never repeats an asset URL or a meta name.
+export const noDuplicateAssets = {
+    'no duplicated stylesheet, script or meta tag': (r) => {
+        if (typeof r.body !== 'string') return false;
+        const seen = {};
+        const patterns = [
+            /<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g,
+            /<script[^>]+src="([^"]+)"/g,
+            /<meta[^>]+name="([^"]+)"/g,
+        ];
+        for (const re of patterns) {
+            let m;
+            while ((m = re.exec(r.body)) !== null) {
+                const key = re.source.slice(1, 6) + ':' + m[1];
+                if (seen[key]) return false;
+                seen[key] = true;
+            }
+        }
+        return true;
+    },
+};

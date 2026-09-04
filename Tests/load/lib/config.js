@@ -17,6 +17,11 @@ export const CONFIG = {
     baseUrl: (env.BASE_URL || 'https://localhost:8885').replace(/\/+$/, ''),
     user:    env.TYPO3_SETUP_ADMIN_USERNAME || 'admin',
     pass:    env.TYPO3_SETUP_ADMIN_PASSWORD || 'Password.1',
+    // Non-admin editor seeded by scripts/setup-typo3.sh (file mount on
+    // 1:/user_upload/ only). Used by backend-multiuser.js to interleave
+    // two permission sets on the same worker pool.
+    editorUser: env.TYPO3_E2E_EDITOR_USERNAME || 'editor',
+    editorPass: env.TYPO3_E2E_EDITOR_PASSWORD || 'Password.1',
 };
 
 // Anonymous frontend routes that exist in the Camino demo site

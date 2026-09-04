@@ -28,9 +28,9 @@
  * been recycled many times by prior tests in the same session — the
  * boundary is intentionally what this scenario probes, and worker
  * state carried over from earlier exercises confuses the signal.
- * `npm run load:backend:recycle` runs the session-prune pre-hook but
- * does NOT restart FrankenPHP; restart it yourself if the previous test
- * has been chewing on the same worker for thousands of requests.
+ * `npm run load:backend:recycle` does NOT restart FrankenPHP; restart it
+ * yourself if the previous test has been chewing on the same worker for
+ * thousands of requests.
  *
  *   k6 run scenarios/backend-recycle.js
  *   k6 run --env ITERATIONS=1100 scenarios/backend-recycle.js   # MAX_REQUESTS=1000

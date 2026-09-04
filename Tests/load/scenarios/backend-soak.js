@@ -25,9 +25,9 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { CONFIG, REQUEST_PARAMS } from '../lib/config.js';
-import { loginOncePerVU, BACKEND_REQUEST_PARAMS } from '../lib/auth.js';
+import { loginOncePerVU, moduleUrl, BACKEND_REQUEST_PARAMS } from '../lib/auth.js';
 import { backendThresholds } from '../lib/thresholds.js';
-import { okStatus, looksLikeBackend, noPHPError, noSecurityTokenError } from '../lib/checks.js';
+import { okStatus, looksLikeBackend, noPHPError, noSecurityTokenError, looksLikeModule} from '../lib/checks.js';
 
 export const options = {
     insecureSkipTLSVerify: true,
@@ -55,8 +55,8 @@ export default function () {
     // singleton reset regresses, this scenario surfaces it as wrong
     // content (and check failures) within minutes.
     for (const id of [1, 5, 6, 7]) {
-        const res = http.get(`${CONFIG.baseUrl}/typo3/module/web/layout?id=${id}`, BACKEND_REQUEST_PARAMS);
-        check(res, { ...okStatus, ...noPHPError, ...noSecurityTokenError });
+        const res = http.get(moduleUrl(main.body, '/typo3/module/web/layout', `id=${id}`), BACKEND_REQUEST_PARAMS);
+        check(res, { ...okStatus, ...looksLikeModule, ...noPHPError, ...noSecurityTokenError });
         sleep(0.5);
     }
 }

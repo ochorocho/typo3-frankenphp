@@ -16,9 +16,9 @@
 import http from 'k6/http';
 import {check, sleep} from 'k6';
 import {CONFIG, REQUEST_PARAMS} from '../lib/config.js';
-import {loginOncePerVU, BACKEND_REQUEST_PARAMS} from '../lib/auth.js';
+import {loginOncePerVU, moduleUrl, BACKEND_REQUEST_PARAMS} from '../lib/auth.js';
 import {backendThresholds} from '../lib/thresholds.js';
-import {okStatus, looksLikeBackend, noPHPError, noSecurityTokenError} from '../lib/checks.js';
+import {okStatus, looksLikeBackend, noPHPError, noSecurityTokenError, looksLikeModule} from '../lib/checks.js';
 
 export const options = {
     insecureSkipTLSVerify: true,
@@ -41,11 +41,13 @@ export default function () {
     check(main, {...okStatus, ...looksLikeBackend, ...noPHPError, ...noSecurityTokenError});
     sleep(1);
 
-    const layout = http.get(`${CONFIG.baseUrl}/typo3/module/web/layout?id=1`, BACKEND_REQUEST_PARAMS);
-    check(layout, {...okStatus, ...noPHPError, ...noSecurityTokenError});
+    // Module routes need the per-session route token; harvest it from the
+    // module menu (see moduleUrl in lib/auth.js).
+    const layout = http.get(moduleUrl(main.body, '/typo3/module/web/layout', 'id=1'), BACKEND_REQUEST_PARAMS);
+    check(layout, {...okStatus, ...looksLikeModule, ...noPHPError, ...noSecurityTokenError});
     sleep(1);
 
-    const list = http.get(`${CONFIG.baseUrl}/typo3/module/records?id=1`, BACKEND_REQUEST_PARAMS);
-    check(list, {...okStatus, ...noPHPError, ...noSecurityTokenError});
+    const list = http.get(moduleUrl(main.body, '/typo3/module/records', 'id=1'), BACKEND_REQUEST_PARAMS);
+    check(list, {...okStatus, ...looksLikeModule, ...noPHPError, ...noSecurityTokenError});
     sleep(1);
 }

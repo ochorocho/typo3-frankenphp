@@ -18,15 +18,14 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { CONFIG, randomFrontendPath, REQUEST_PARAMS } from '../lib/config.js';
-import { loginOncePerVU, BACKEND_REQUEST_PARAMS } from '../lib/auth.js';
+import { loginOncePerVU, moduleUrl, BACKEND_REQUEST_PARAMS } from '../lib/auth.js';
 import { defaultThresholds } from '../lib/thresholds.js';
 import {
     okStatus,
     looksLikeCaminoPage,
     looksLikeBackend,
     noPHPError,
-    noSecurityTokenError,
-} from '../lib/checks.js';
+    noSecurityTokenError,, looksLikeModule} from '../lib/checks.js';
 
 export const options = {
     insecureSkipTLSVerify: true,
@@ -67,7 +66,7 @@ export function backend() {
     check(main, { ...okStatus, ...looksLikeBackend, ...noPHPError, ...noSecurityTokenError });
     sleep(1);
 
-    const layout = http.get(`${CONFIG.baseUrl}/typo3/module/web/layout?id=1`, BACKEND_REQUEST_PARAMS);
-    check(layout, { ...okStatus, ...noPHPError, ...noSecurityTokenError });
+    const layout = http.get(moduleUrl(main.body, '/typo3/module/web/layout', 'id=1'), BACKEND_REQUEST_PARAMS);
+    check(layout, { ...okStatus, ...looksLikeModule, ...noPHPError, ...noSecurityTokenError });
     sleep(2);
 }
