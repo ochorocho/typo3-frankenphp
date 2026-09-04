@@ -6,7 +6,7 @@ import {test, expect} from '@playwright/test';
  * BackendLayoutView cache keys are page-uid-less so the previous page's
  * record list can leak into the current page's view under worker mode.
  *
- * Fix lives in Classes/Worker/StateSnapshotService.php (cache.runtime key
+ * Fix lives in Classes/Worker/WorkerStateResetter.php (cache.runtime key
  * removal). This test exercises the List rendering path too — if the fix
  * happens to address Layout but not List (e.g. List uses a different cache
  * key we missed), this catches it.

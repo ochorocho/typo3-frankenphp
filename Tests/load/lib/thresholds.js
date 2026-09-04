@@ -40,7 +40,7 @@ export const defaultThresholds = {
 };
 
 // Backend (authenticated) requests trip a heavier code path —
-// StateSnapshotService runs on every request, plus TYPO3 backend hits
+// WorkerStateResetter runs on every request, plus TYPO3 backend hits
 // the session DB. p95 < 2000 ms is a CI-noise-tolerant expectation
 // under steady load (was 1000 ms; bumped for the same reason as
 // defaultThresholds — see its docblock).

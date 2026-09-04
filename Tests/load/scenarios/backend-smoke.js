@@ -3,7 +3,7 @@
  *
  * Validates the authenticated path end-to-end: log in once, then hit
  * /typo3/main and Web>Layout in a loop. Catches "login regression",
- * "backend bootstrap crash", and "StateSnapshotService fails on its
+ * "backend bootstrap crash", and "WorkerStateResetter fails on its
  * first reset" before spending minutes on heavier scenarios.
  *
  *   k6 run scenarios/backend-smoke.js

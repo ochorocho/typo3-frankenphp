@@ -27,7 +27,7 @@ import {test, expect} from '@playwright/test';
  *      next session's request received the URI with the old token,
  *      validation failed, /typo3/main 302'd to /typo3/login, /login
  *      303'd back to /typo3/main, infinite redirect.
- *      Reset per request in `Classes/Worker/StateSnapshotService::restore()`.
+ *      Reset per request in `Classes/Worker/WorkerStateResetter::reset()`.
  */
 test('navigating /typo3/main never produces nested list_frame or CSRF flash', async ({page}) => {
     for (let i = 0; i < 5; i++) {

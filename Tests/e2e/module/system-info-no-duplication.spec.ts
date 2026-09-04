@@ -8,7 +8,7 @@ import {test, expect} from '@playwright/test';
  * and the severity badge stays at its highest historical value rather than
  * reflecting current state.
  *
- * Fix lives in Classes/Worker/StateSnapshotService.php — clears
+ * Fix lives in Classes/Worker/WorkerStateResetter.php — clears
  * systemInformation/systemMessages/highestSeverity via Closure::bind on
  * every worker request.
  */

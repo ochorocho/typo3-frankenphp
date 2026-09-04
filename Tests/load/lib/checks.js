@@ -41,7 +41,7 @@ export const looksLikeCaminoPage = {
 
 // TYPO3 emits this flash message via FormProtection when a backend form
 // submission fails CSRF validation. In a long-running FrankenPHP worker,
-// this is the canary for StateSnapshotService not restoring the
+// this is the canary for WorkerStateResetter not restoring the
 // FormProtectionFactory's per-session token state — a regression that
 // would silently brick every POST in the backend. Wire this in wherever
 // `noPHPError` is used on an authenticated response.

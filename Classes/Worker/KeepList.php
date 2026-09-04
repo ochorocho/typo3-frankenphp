@@ -15,6 +15,10 @@ namespace Ochorocho\FrankenPhp\Worker;
  *    though they have mutable properties. Their dependency closure is pinned
  *    as well. A pinned chain that reaches RequestId, a non-shared service or
  *    an explicit DISCARD is reported as a pin conflict and NOT kept.
+ *    Never pin a registry that stores service INSTANCES collected from a
+ *    tagged iterator (toolbar items, widgets, link types, MFA providers):
+ *    those instances are invisible to the closure check and carry the state
+ *    of whichever request built them first.
  *  - SOFT: kept only if their dependency closure stays clean.
  *  - DISCARD: never kept, even if a future refactor makes them readonly.
  *  - RESEED: discarded, then eagerly re-created after the wipe and fed the
@@ -43,17 +47,23 @@ final class KeepList
         // Configuration registries, computed once from static config.
         \TYPO3\CMS\Core\Localization\Locales::class,
         \TYPO3\CMS\Core\Country\CountryProvider::class,
-        \TYPO3\CMS\Backend\Routing\Router::class,
-        \TYPO3\CMS\Backend\Module\ModuleRegistry::class,
         \TYPO3\CMS\Core\DataHandling\SoftReference\SoftReferenceParserFactory::class,
         \TYPO3\CMS\Core\Resource\Driver\DriverRegistry::class,
         \TYPO3\CMS\Core\Resource\Collection\FileCollectionRegistry::class,
         \TYPO3\CMS\Core\Resource\Processing\TaskTypeRegistry::class,
-        \TYPO3\CMS\Core\LinkHandling\LinkService::class,
-        \TYPO3\CMS\Core\Authentication\Mfa\MfaProviderRegistry::class,
         \TYPO3\CMS\Core\Console\CommandRegistry::class,
         \TYPO3\CMS\Core\Site\Set\SetRegistry::class,
+        \TYPO3\CMS\Core\Site\Set\SetCollector::class,
+        \TYPO3\CMS\Core\Site\Set\YamlSetDefinitionProvider::class,
+        \TYPO3\CMS\Core\Site\Set\CategoryRegistry::class,
+        \TYPO3\CMS\Core\DataHandling\PageDoktypeRegistry::class,
+        \TYPO3\CMS\Backend\CodeEditor\Registry\AddonRegistry::class,
+        \TYPO3\CMS\Backend\CodeEditor\Registry\ModeRegistry::class,
         \TYPO3\CMS\Extbase\Reflection\ReflectionService::class,
+        \TYPO3\CMS\Extbase\Persistence\ClassesConfiguration::class,
+        // Optional system extensions, referenced by name so the list does not
+        // require them to be installed.
+        'TYPO3\\CMS\\Webhooks\\WebhookTypesRegistry',
     ];
 
     /** @var list<string> */
@@ -61,9 +71,15 @@ final class KeepList
 
     /** @var list<string> */
     public const array DISCARD = [
+        // ModuleProvider::filterInaccessibleSubModules() removes submodules
+        // from the shared module objects for restricted users. Kept, the
+        // next admin on that worker inherits the reduced menu. Router routes
+        // reference the same module objects, so it goes with it.
+        \TYPO3\CMS\Backend\Module\ModuleRegistry::class,
+        \TYPO3\CMS\Backend\Module\ModuleProvider::class,
+        \TYPO3\CMS\Backend\Routing\Router::class,
         \TYPO3\CMS\Core\Resource\StorageRepository::class,
         \TYPO3\CMS\Core\Resource\ResourceFactory::class,
-        \TYPO3\CMS\Core\Site\SiteFinder::class,
         \TYPO3\CMS\Backend\Routing\UriBuilder::class,
         \TYPO3\CMS\Core\Registry::class,
         \TYPO3\CMS\Core\Messaging\FlashMessageService::class,

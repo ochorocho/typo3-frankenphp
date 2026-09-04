@@ -8,7 +8,7 @@ import {test, expect} from '@playwright/test';
  * View / Edit / Cache / Reload / Share buttons appear three times in the
  * doc-header toolbar.
  *
- * Fix lives in Classes/Worker/StateSnapshotService.php — re-instantiates the
+ * Fix lives in Classes/Worker/WorkerStateResetter.php — re-instantiates the
  * ButtonBar from the DocHeader plus clears the shared ButtonBar instance's
  * $buttons via Closure::bind on every worker request.
  *

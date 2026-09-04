@@ -4,7 +4,7 @@ HTTP-level load tests for the `ochorocho/frankenphp` extension. The
 suite measures throughput, tail latency, and (most importantly) the
 **stability of FrankenPHP worker mode under sustained traffic** — the
 soak scenarios are the regression-detection path for
-`Classes/Worker/StateSnapshotService.php`.
+`Classes/Worker/WorkerStateResetter.php`.
 
 For correctness checks the Playwright suite (`Tests/e2e/`) is the right
 tool. For *performance* and *stability over time*, this is.
@@ -58,7 +58,7 @@ npm run load:stress          # 5 min ramp 0→100 VUs — finds saturation
 npm run load:spike           # 90 s 0→200→0 — burst recovery
 npm run load:soak            # 10 min sustained — memory-leak detection
 npm run load:backend         # 2 min authenticated nav
-npm run load:backend:soak    # 10 min — StateSnapshotService regression detector
+npm run load:backend:soak    # 10 min — WorkerStateResetter regression detector
 npm run load:install-tool    # 2 min — `?__typo3_install` failsafe path
 npm run load:mixed           # 5 min — 80% frontend + 20% backend
 ```
@@ -87,7 +87,7 @@ uses, so one env export covers both).
 | `frontend-soak.js`      | soak   | 10   | 10 min   | Memory-leak / opcache-bloat detection                            |
 | `backend-smoke.js`      | smoke  | 1    | 30 s     | Login + Web>Layout sanity                                        |
 | `backend-load.js`       | load   | 5    | 2 min    | Auth + nav throughput (lower VUs — session table serialises)     |
-| `backend-soak.js`       | soak   | 5    | 10 min   | StateSnapshotService stability over thousands of authed requests |
+| `backend-soak.js`       | soak   | 5    | 10 min   | WorkerStateResetter stability over thousands of authed requests |
 | `install-tool-smoke.js` | smoke  | 1    | 30 s     | `?__typo3_install` routes to failsafe                            |
 | `install-tool-load.js`  | load   | 10   | 2 min    | Per-request `/index.php` path under load                         |
 | `mixed-workload.js`     | load   | 8+2  | 5 min    | Realistic 80/20 mix in one run                                   |
@@ -102,7 +102,7 @@ matter:
 - **`http_req_duration`** — `avg`, `p(50)`, `p(90)`, `p(95)`, `p(99)`,
   `max`. For anonymous frontend, expect `p(95) < 500 ms` on a healthy
   worker-mode setup. Authenticated backend traffic doubles that
-  (StateSnapshotService runs per request).
+  (WorkerStateResetter runs per request).
 - **`http_req_failed.rate`** — fraction of requests that returned a
   network error or 5xx. Should be `< 0.01` for smoke/load/soak.
 - **`checks.rate`** — fraction of `check()` assertions that passed.
@@ -135,7 +135,7 @@ matter:
   didn't recover, some worker died and left a stuck request.
 - **Backend smoke fails on iteration 1, succeeds on 2+** → login
   worked but the very first authenticated request crashed (typical
-  StateSnapshotService regression — see the file's existing comments
+  WorkerStateResetter regression — see the file's existing comments
   for what fields it resets).
 
 ---
@@ -209,7 +209,7 @@ when finished.
 - **Soak scenarios show stable latency for 8 min then a spike** →
   classic GC stop-the-world from leaked singletons. Capture
   `--out json=soak.ndjson` and inspect the timestamps around the spike;
-  cross-reference `Classes/Worker/StateSnapshotService.php` resets to
+  cross-reference `Classes/Worker/WorkerStateResetter.php` resets to
   see what state might have grown without being cleared.
 
 ---
