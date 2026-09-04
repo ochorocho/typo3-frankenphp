@@ -94,6 +94,11 @@ jobs:
           # which lives in a separate tap that needs an explicit `brew tap`
           # before the install resolves.
           brew tap shivammathur/php
+          brew tap dunglas/frankenphp
+          # Homebrew refuses to load formulae from third-party taps unless
+          # they are explicitly trusted (Homebrew 6 "untrusted tap" gate).
+          brew trust --tap shivammathur/php
+          brew trust --tap dunglas/frankenphp
           brew install dunglas/frankenphp/frankenphp
           # `eval brew shellenv` only mutates PATH in this step's shell;
           # subsequent steps spawn fresh `bash -e` and would lose it.
@@ -218,6 +223,11 @@ jobs:
           # which lives in a separate tap that needs an explicit `brew tap`
           # before the install resolves.
           brew tap shivammathur/php
+          brew tap dunglas/frankenphp
+          # Homebrew refuses to load formulae from third-party taps unless
+          # they are explicitly trusted (Homebrew 6 "untrusted tap" gate).
+          brew trust --tap shivammathur/php
+          brew trust --tap dunglas/frankenphp
           brew install dunglas/frankenphp/frankenphp
           # `eval brew shellenv` only mutates PATH in this step's shell;
           # subsequent steps spawn fresh `bash -e` and would lose it.
