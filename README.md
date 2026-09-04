@@ -50,44 +50,6 @@ Then run FrankenPHP from the project root using the created config files (`Caddy
 frankenphp run -c Caddyfile -e .env
 ```
 
-### Required: apply the FormProtectionFactory cache-key patch
-
-Worker mode exposes a latent bug in TYPO3's `FormProtectionFactory`: its `cache.runtime` entry for the
-`BackendFormProtection` instance is keyed by request *type* only, so under FrankenPHP the cached BFP from one session
-gets served back to subsequent requests and form-token validation runs against the wrong session secret —
-"Validating the security token of this form has failed", with the user-visible symptom of a redirect loop between
-`/typo3/main` and `/typo3/login`.
-
-This extension ships a small patch (`Patches/cms-core-form-protection-factory-session-aware-cache.patch`) that folds
-the BE_USER session identifier into the cache key. Apply it via [cweagans/composer-patches](https://github.com/cweagans/composer-patches)
-by adding the following to **your project's** `composer.json` (the extension's own `composer.json` does not declare
-patches because `composer-patches` v1.7 cannot resolve sub-package patch paths from the consuming project):
-
-```json
-{
-    "require-dev": {
-        "cweagans/composer-patches": "^1.7"
-    },
-    "config": {
-        "allow-plugins": {
-            "cweagans/composer-patches": true
-        }
-    },
-    "extra": {
-        "composer-exit-on-patch-failure": true,
-        "patches": {
-            "typo3/cms-core": {
-                "FormProtectionFactory: session-aware cache key for worker-mode safety": "vendor/ochorocho/frankenphp/Patches/cms-core-form-protection-factory-session-aware-cache.patch"
-            }
-        }
-    }
-}
-```
-
-After adding this, run `composer update typo3/cms-core` (or delete `vendor/typo3/cms-core` and re-run
-`composer install`) so the patch is applied. Subsequent `composer install` / `composer update` runs re-apply
-automatically.
-
 ## Diagnostics
 
 The TYPO3 backend's **System Information** dropdown (the info icon in the topbar) shows a **Worker Mode** row —

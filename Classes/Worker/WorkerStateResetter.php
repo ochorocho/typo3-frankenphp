@@ -35,24 +35,6 @@ use TYPO3\CMS\Frontend\ContentObject\Menu\MenuContentObjectFactory;
  */
 final readonly class WorkerStateResetter
 {
-    /**
-     * Keys in `cache.runtime` that Core caches without per-user / per-page
-     * parameterization. Under PHP-FPM the cache dies with the process; in
-     * the worker they would serve stale rows to the next request.
-     *
-     * @var list<string>
-     */
-    private const array RUNTIME_CACHE_KEYS = [
-        'ContentFetcher_fetchedContentRecords',
-        'backend-layout-view-selected-backend-layouts',
-        'backend-layout-view-selected-combined-identifiers',
-        'backendUserAuthenticationFileMountRecords',
-        'generalUtilityXml2Array',
-        'formEngineUtilityTsConfigForTableRow',
-        'workspace-service-available-workspaces',
-        'workspace-service-available-workspaces-detailed',
-    ];
-
     public function capture(ContainerInterface $container): WorkerStateSnapshot
     {
         // ext_localconf.php may register menu types, assets and meta tag
@@ -187,14 +169,13 @@ final readonly class WorkerStateResetter
         // request reconnects instead of hitting "MySQL server has gone away".
         $container->get(ConnectionPool::class)->resetConnections();
 
-        // cache.runtime is registered with the CacheManager, so it cannot be
-        // discarded without creating a second instance. Remove the keys that
-        // are known to be cached without request-specific parameterization.
+        // cache.runtime's backend is documented as "stores cache entries during
+        // one script run". Core caches user- and page-bound data in it under
+        // fixed keys (file mounts, backend layouts, workspace lists, form
+        // protection instances). It is registered with the CacheManager, so
+        // it cannot be discarded without creating a second instance: flush it.
         if ($container->has('cache.runtime')) {
-            $runtimeCache = $container->get('cache.runtime');
-            foreach (self::RUNTIME_CACHE_KEYS as $key) {
-                $runtimeCache->remove($key);
-            }
+            $container->get('cache.runtime')->flush();
         }
 
         // Boot-populated registries with a public state API: replay the

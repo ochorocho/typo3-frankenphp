@@ -25,14 +25,14 @@ k6 soak scenarios pass; discarded count stable across requests.
 `Patches/` and the manual composer patch step.
 **Success Criteria**: login/re-login/page-tree specs green on pristine cms-core.
 **Tests**: `form-token-after-relogin`, `worker-state-isolation`, `iframe-nesting-guard`
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: Curate keep-list, static-leak shims, new e2e
 **Goal**: Zero demoted PINNED entries in the audit; static Core leaks shimmed with
 upstream references; storage permission isolation covered by e2e.
 **Success Criteria**: audit clean; e2e + k6 green.
 **Tests**: `storage-permission-isolation.spec.ts`
-**Status**: Not Started
+**Status**: In Progress
 
 ## Stage 5: Performance budget and cleanup
 **Goal**: k6 before/after within budget (p95 +10 %, throughput -10 %); docs updated.

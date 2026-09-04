@@ -112,19 +112,13 @@ generate_composer_json() {
         "allow-plugins": {
             "typo3/cms-composer-installers": true,
             "typo3/class-alias-loader": true,
-            "helhum/dotenv-connector": true,
-            "cweagans/composer-patches": true
+            "helhum/dotenv-connector": true
         },
         "sort-packages": true,
         "vendor-dir": "vendor"
     },
     "extra": {
-      "typo3/cms": { "web-dir": "public" },
-      "patches": {
-          "typo3/cms-core": {
-              "FormProtectionFactory: session-aware cache key for worker-mode safety (https://github.com/ochorocho/typo3-frankenphp)": "../Patches/cms-core-form-protection-factory-session-aware-cache.patch"
-          }
-      }
+      "typo3/cms": { "web-dir": "public" }
     }
 }
 EOF
