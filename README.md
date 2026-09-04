@@ -66,6 +66,10 @@ vendor/bin/typo3 frankenphp:audit --summary  # counts and the top demotion cause
 vendor/bin/typo3 frankenphp:audit --format=markdown --filter=Extbase
 ```
 
+Run it inside a TYPO3 installation (in this repository that is the `Build/` sandbox, not the root: the root
+`vendor/` only holds the extension's dev dependencies). The classification is computed when the DI container is
+compiled, so flush caches after changing `KeepList` or service tags.
+
 Worker mode is discard-by-default: every DI service instance that is not provably stateless (or explicitly pinned)
 is dropped at the start of each request and rebuilt lazily by the compiled container. The audit prints the
 classification with reasons so you can see why a service is kept or discarded and tune it via the
