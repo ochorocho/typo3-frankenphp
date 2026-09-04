@@ -98,13 +98,13 @@ override the analysis where it is wrong.
 vendor/bin/typo3 cache:flush && vendor/bin/typo3 frankenphp:audit --filter='Vendor\MyExt'
 ```
 
-| Reason | Meaning for you |
-| --- | --- |
-| `keep / readonly`, `keep / readonly-props` | Kept across requests. Nothing to do. |
-| `discard / mutable` | Rebuilt per request. Correct by default; only worth changing for expensive boot-populated registries. |
-| `discard / demoted-via:<service>` | Would be kept, but holds a discarded service, a non-shared service or `RequestId`. Fix the dependency, not the holder. |
-| `discard / pattern` | `*Controller`, `*ToolbarItem`: always per request. |
-| `discard / pin-conflict:<chain>` | A pin whose closure reaches a per-request service. The chain in the reason shows where. |
+| Reason                                     | Meaning for you                                                                                                        |
+|--------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `keep / readonly`, `keep / readonly-props` | Kept across requests. Nothing to do.                                                                                   |
+| `discard / mutable`                        | Rebuilt per request. Correct by default; only worth changing for expensive boot-populated registries.                  |
+| `discard / demoted-via:<service>`          | Would be kept, but holds a discarded service, a non-shared service or `RequestId`. Fix the dependency, not the holder. |
+| `discard / pattern`                        | `*Controller`, `*ToolbarItem`: always per request.                                                                     |
+| `discard / pin-conflict:<chain>`           | A pin whose closure reaches a per-request service. The chain in the reason shows where.                                |
 
 **2. Write services so they are kept automatically**
 
@@ -123,12 +123,12 @@ vendor/bin/typo3 cache:flush && vendor/bin/typo3 frankenphp:audit --filter='Vend
 Three hooks, all inert when this extension is not installed. All are read when the DI container is compiled, so
 run `cache:flush` after editing.
 
-| You want to | Use |
-| --- | --- |
-| Keep or discard one of your own services | `frankenphp.keep` (`mode: soft` or `pinned`) / `frankenphp.discard` tag in `Services.yaml`, or `#[AutoconfigureTag]` on the class |
-| Address services of other packages, use patterns, or ship one file per package | `Configuration/FrankenPhpWorker.php` (below) |
-| Give the project the final say over every extension | `config/system/frankenphp-worker.php`, same format |
-| Clear the state of a pinned service each request | Listener on `WorkerRequestStartingEvent` |
+| You want to                                                                    | Use                                                                                                                               |
+|--------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| Keep or discard one of your own services                                       | `frankenphp.keep` (`mode: soft` or `pinned`) / `frankenphp.discard` tag in `Services.yaml`, or `#[AutoconfigureTag]` on the class |
+| Address services of other packages, use patterns, or ship one file per package | `Configuration/FrankenPhpWorker.php` (below)                                                                                      |
+| Give the project the final say over every extension                            | `config/system/frankenphp-worker.php`, same format                                                                                |
+| Clear the state of a pinned service each request                               | Listener on `WorkerRequestStartingEvent`                                                                                          |
 
 ```php
 <?php
