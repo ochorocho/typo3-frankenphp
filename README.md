@@ -85,6 +85,76 @@ headers: `X-FrankenPHP-Discarded` (instances dropped before the request; should 
 leak) and `X-FrankenPHP-Reset-Us` (microseconds the reset took). Details, including measured costs:
 [Documentation/WorkerMode.md](Documentation/WorkerMode.md).
 
+### Adapting an extension for worker mode
+
+Under PHP-FPM every request starts from a fresh process. In a worker, DI service instances live until something drops
+them, and this extension drops every instance it cannot prove stateless at the start of each request. Most extensions
+therefore work unchanged. What is left for an author is to check the verdict, write services so they are kept, and
+override the analysis where it is wrong.
+
+**1. Read the audit for your namespace**
+
+```bash
+vendor/bin/typo3 cache:flush && vendor/bin/typo3 frankenphp:audit --filter='Vendor\MyExt'
+```
+
+| Reason | Meaning for you |
+| --- | --- |
+| `keep / readonly`, `keep / readonly-props` | Kept across requests. Nothing to do. |
+| `discard / mutable` | Rebuilt per request. Correct by default; only worth changing for expensive boot-populated registries. |
+| `discard / demoted-via:<service>` | Would be kept, but holds a discarded service, a non-shared service or `RequestId`. Fix the dependency, not the holder. |
+| `discard / pattern` | `*Controller`, `*ToolbarItem`: always per request. |
+| `discard / pin-conflict:<chain>` | A pin whose closure reaches a per-request service. The chain in the reason shows where. |
+
+**2. Write services so they are kept automatically**
+
+- Prefer `final readonly class` with constructor promotion. Every instance property readonly means "kept".
+- Do not store request data (the request, the backend user, the site, the language, results of the last call) in a
+  shared service. One mutable property turns the service and everything that holds it into per-request objects.
+- Never inject `RequestId`, `ServerRequestInterface` or `$GLOBALS['TYPO3_REQUEST']` into a shared service. Read them
+  from the request that is passed to the method.
+- Keep `GeneralUtility::setSingletonInstance()` out of `ext_localconf.php`: that registry is purged per request.
+- Static properties are never reset. The audit lists them as `static: …`; avoid them for anything request-related.
+- A registry that collects service *instances* from a tagged iterator (toolbar items, widgets, link types, MFA
+  providers) must stay per request. Kept, it carries the state of whichever request built it first.
+
+**3. Override the analysis where it is wrong**
+
+Three hooks, all inert when this extension is not installed. All are read when the DI container is compiled, so
+run `cache:flush` after editing.
+
+| You want to | Use |
+| --- | --- |
+| Keep or discard one of your own services | `frankenphp.keep` (`mode: soft` or `pinned`) / `frankenphp.discard` tag in `Services.yaml`, or `#[AutoconfigureTag]` on the class |
+| Address services of other packages, use patterns, or ship one file per package | `Configuration/FrankenPhpWorker.php` (below) |
+| Give the project the final say over every extension | `config/system/frankenphp-worker.php`, same format |
+| Clear the state of a pinned service each request | Listener on `WorkerRequestStartingEvent` |
+
+```php
+<?php
+// EXT:my_ext/Configuration/FrankenPhpWorker.php — every key optional, pure data
+return [
+    'pin'             => [\Vendor\MyExt\Registry\FormatRegistry::class],     // kept with its dependency closure
+    'keep'            => [\Vendor\MyExt\Service\PriceCalculator::class],     // kept while its closure stays clean
+    'discard'         => [\Vendor\MyExt\Service\RequestScopedCollector::class, 'my_ext.legacy.service.id'],
+    'discardPatterns' => ['/^Vendor\\\\MyExt\\\\Controller\\\\/'],           // matched against id and class
+];
+```
+
+Precedence is one rule: an explicit discard from any source (curated list, tag, pattern, file) wins over a keep or
+pin from any other source. `keep` is soft and can still be demoted by its dependencies; a `pin` whose closure reaches
+a per-request service is reported as a pin conflict and not kept. The audit shows the origin of every override as
+`config:<extension key>`, `pinned:config:<extension key>` or `pattern:config:<extension key>`. Unknown keys,
+non-string entries or invalid patterns fail the container build with the file name in the message.
+
+**4. Verify**
+
+- Rerun the audit: your overrides show up with their origin.
+- In Development context, `X-FrankenPHP-Discarded` must stabilise after a few requests; growth means state leaks.
+- Exercise the extension with two backend users of different permissions on the same worker pool. State that
+  survives a request shows up as duplicated UI elements, wrong menus or wrong permissions. `Tests/e2e/` in this
+  repository is a template for such specs, `Tests/load/scenarios/backend-multiuser.js` for a k6 soak.
+
 ## Prometheus metrics dashboard widget
 
 Run `vendor/bin/typo3 frankenphp:init --prometheus` (add `--force` to overwrite an existing Caddyfile / `.env`). This

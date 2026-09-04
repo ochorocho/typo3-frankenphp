@@ -30,14 +30,27 @@ final class WorkerConfigurationFileLocator
      */
     public function locate(): array
     {
-        $files = [];
+        $packagePaths = [];
         foreach ($this->createPackageManager()->getActivePackages() as $package) {
-            $file = $package->getPackagePath() . self::PACKAGE_FILE;
+            $packagePaths[$package->getPackageKey()] = $package->getPackagePath();
+        }
+        return $this->locateIn($packagePaths, Environment::getConfigPath());
+    }
+
+    /**
+     * @param array<string, string> $packagePaths package key => package path with trailing slash
+     * @return array<string, string> origin => absolute path
+     */
+    public function locateIn(array $packagePaths, string $configPath): array
+    {
+        $files = [];
+        foreach ($packagePaths as $packageKey => $packagePath) {
+            $file = rtrim($packagePath, '/') . '/' . self::PACKAGE_FILE;
             if (is_file($file)) {
-                $files[$package->getPackageKey()] = $file;
+                $files[$packageKey] = $file;
             }
         }
-        $projectFile = Environment::getConfigPath() . '/' . self::PROJECT_FILE;
+        $projectFile = rtrim($configPath, '/') . '/' . self::PROJECT_FILE;
         if (is_file($projectFile)) {
             $files[self::PROJECT_ORIGIN] = $projectFile;
         }

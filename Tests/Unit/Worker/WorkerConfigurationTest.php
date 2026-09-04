@@ -69,6 +69,15 @@ final class WorkerConfigurationTest extends TestCase
     }
 
     #[Test]
+    public function nonStringEntryIsRejected(): void
+    {
+        $this->expectException(\UnexpectedValueException::class);
+        $this->expectExceptionMessage('file.php: "pin" must only contain non-empty strings, int found.');
+
+        WorkerConfiguration::fromArray(['pin' => [42]], 'my_ext', 'file.php');
+    }
+
+    #[Test]
     public function invalidRegularExpressionIsRejected(): void
     {
         $this->expectException(\UnexpectedValueException::class);
@@ -87,5 +96,18 @@ final class WorkerConfigurationTest extends TestCase
 
         self::assertSame(['A' => 'ext_a', 'B' => 'ext_b'], $merged->keep);
         self::assertSame(['C' => 'ext_b'], $merged->discard);
+    }
+
+    #[Test]
+    public function mergeCoversEveryList(): void
+    {
+        $first = WorkerConfiguration::fromArray(['pin' => ['P'], 'discardPatterns' => ['/a/']], 'ext_a', 'a.php');
+        $second = WorkerConfiguration::fromArray(['pin' => ['Q'], 'discardPatterns' => ['/b/']], 'ext_b', 'b.php');
+
+        $merged = $first->merge($second);
+
+        self::assertSame(['P' => 'ext_a', 'Q' => 'ext_b'], $merged->pinned);
+        self::assertSame(['/a/' => 'ext_a', '/b/' => 'ext_b'], $merged->discardPatterns);
+        self::assertFalse($merged->isEmpty());
     }
 }

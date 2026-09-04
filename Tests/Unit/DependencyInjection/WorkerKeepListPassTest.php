@@ -71,7 +71,8 @@ final class WorkerKeepListPassTest extends TestCase
         $this->register($builder, 'config.discard', [], StatelessReadonly::class);
         $this->register($builder, 'config.keep', [], MutableService::class);
         $this->register($builder, 'config.keep.denied', [], MutableService::class)->addTag(WorkerKeepListPass::TAG_DISCARD);
-        $this->register($builder, 'config.pin.root', [new Reference(PinnedDependency::class)], PinnedRoot::class);
+        $this->register($builder, 'config.pin.dependency', [], StatelessReadonly::class);
+        $this->register($builder, 'config.pin.root', [new Reference('config.pin.dependency')], PinnedRoot::class);
         $this->register($builder, 'config.pin.denied', [], StatelessReadonly::class)->addTag(WorkerKeepListPass::TAG_DISCARD);
         $this->register($builder, 'vendor.ext.legacy.thing', [], StatelessReadonly::class);
 
@@ -83,7 +84,7 @@ final class WorkerKeepListPassTest extends TestCase
                 discardPatterns: [],
                 keepIdPatterns: ['/^cache\./' => 'cache-frontend'],
                 configuration: new WorkerConfiguration(
-                    pinned: ['config.pin.root' => 'ext_a', 'config.pin.denied' => 'ext_a'],
+                    pinned: ['config.pin.root' => 'ext_a', 'config.pin.denied' => 'ext_a', 'pinned.missing' => 'ext_a'],
                     keep: ['config.keep' => 'ext_a', 'config.keep.denied' => 'ext_a'],
                     discard: ['config.discard' => 'ext_a', 'does.not.exist' => 'ext_a'],
                     discardPatterns: ['/^vendor\.ext\./' => 'ext_b'],
@@ -264,7 +265,14 @@ final class WorkerKeepListPassTest extends TestCase
     {
         self::assertContains('config.pin.root', $this->keep);
         self::assertSame('pinned:config:ext_a', $this->report['config.pin.root']['reason']);
-        self::assertContains(PinnedDependency::class, $this->keep);
+        self::assertContains('config.pin.dependency', $this->keep);
+        self::assertSame('pinned-via:config.pin.root', $this->report['config.pin.dependency']['reason']);
+    }
+
+    #[Test]
+    public function configurationPinOfMissingServiceIsIgnored(): void
+    {
+        self::assertArrayNotHasKey('pinned.missing', $this->report);
     }
 
     #[Test]
