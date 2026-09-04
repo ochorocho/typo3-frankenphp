@@ -28,7 +28,8 @@ final class KeepList
 {
     /** @var list<string> */
     public const array PINNED = [
-        // Process-wide infrastructure with reset hooks (see KeepHooks).
+        // Process-wide infrastructure with reset hooks
+        // (see WorkerStateResetter::resetKeptServices()).
         \TYPO3\CMS\Core\Context\Context::class,
         \TYPO3\CMS\Core\Cache\CacheManager::class,
         'cache.runtime',

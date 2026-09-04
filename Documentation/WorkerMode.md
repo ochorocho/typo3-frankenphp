@@ -27,11 +27,12 @@ safe to keep. The compiled container rebuilds dropped services lazily.
 | `keep / readonly` | `readonly class` |
 | `keep / readonly-props` | every instance property is readonly |
 | `keep / cache-frontend` | `cache.*` ids; the CacheManager owns these anyway |
-| `keep / pinned` | curated boot-populated services (`KeepList::PINNED`) and their dependency closure |
+| `keep / pinned` | curated boot-populated services (`KeepList::PINNED`), `frankenphp.keep` with `mode: pinned`, `pin` entries of a `FrankenPhpWorker.php` (`pinned:config:<origin>`), and their dependency closure |
+| `keep / tag` / `config` | `frankenphp.keep` tag, `keep` entries of a `FrankenPhpWorker.php` (`config:<origin>`); soft, still subject to closure demotion |
 | `discard / mutable` | at least one mutable instance property |
 | `discard / opaque` | factory return type is an interface or unknown |
 | `discard / inlined-mutable` | holds an inlined definition of a mutable class |
-| `discard / curated` / `pattern` / `tag` | `KeepList::DISCARD`, `*Controller`, `*ToolbarItem`, `frankenphp.discard` tag |
+| `discard / curated` / `pattern` / `tag` / `config` | `KeepList::DISCARD`, `*Controller`, `*ToolbarItem`, `frankenphp.discard` tag, `discard` / `discardPatterns` entries of a `FrankenPhpWorker.php` (`config:<origin>`, `pattern:config:<origin>`) |
 | `discard / demoted-via` | kept intrinsically, but (transitively) holds a discarded service, a non-shared service or `RequestId` |
 | `discard / pin-conflict` | a pinned root whose closure reaches one of those blockers; reported, not kept |
 
@@ -57,9 +58,16 @@ closure instead.
    `ext_localconf.php` survive).
 6. `WorkerRequestStartingEvent` is dispatched for third-party resets.
 
-### Extending the lists
+### Controlling your own services
 
-Third-party services can tag themselves:
+The automatic classification is the default; these three hooks tune it. Both
+declarative forms are inert when this extension is not installed, so shipping
+them costs nothing. Like `Services.yaml`, they are read once when the DI
+container is compiled: run `typo3 cache:flush` after editing.
+
+**1. Tag a service** — for a package's own definitions, in `Services.yaml`
+(or `#[AutoconfigureTag('frankenphp.keep', ['mode' => 'pinned'])]` on the
+class, TYPO3 autoconfigures by default):
 
 ```yaml
 Vendor\Ext\Service\MyRegistry:
@@ -70,14 +78,63 @@ Vendor\Ext\Service\PerRequestThing:
     - { name: frankenphp.discard }
 ```
 
+**2. `Configuration/FrankenPhpWorker.php`** — one file per package, plain
+data. It also reaches services of *other* packages and supports patterns, so
+an extension can discard a Core service it knows to misbehave with its own
+code, and a project can override any extension author from
+`config/system/frankenphp-worker.php` without forking. Every key is optional;
+unknown keys, non-string entries or invalid patterns break the container
+build with the file name in the message.
+
+```php
+<?php
+// EXT:my_ext/Configuration/FrankenPhpWorker.php
+return [
+    // Survive across requests together with their dependency closure.
+    // Never pin a registry that stores instances collected from a tagged
+    // iterator (toolbar items, widgets, …): those carry the state of the
+    // request that built them first.
+    'pin' => [
+        \Vendor\MyExt\Registry\FormatRegistry::class,
+    ],
+    // Survive only while their dependency closure stays clean.
+    'keep' => [
+        \Vendor\MyExt\Service\PriceCalculator::class,
+    ],
+    // Always discarded, also when the analysis would keep them.
+    'discard' => [
+        \Vendor\MyExt\Service\RequestScopedCollector::class,
+        'my_ext.legacy.service.id',
+    ],
+    // Regular expressions, matched against service id and class name.
+    'discardPatterns' => [
+        '/^Vendor\\\\MyExt\\\\Controller\\\\/',
+    ],
+];
+```
+
+Entries are service ids or class names (aliases are resolved, unknown names
+are ignored so a file may reference optional packages). Precedence is
+simple: **an explicit discard from any source wins** — curated list, tag,
+pattern or file — over a `keep` or `pin` from any other source. `keep` is
+soft and can still be demoted by the dependency closure; a `pin` whose
+closure reaches an explicit discard, a non-shared service or `RequestId`
+is reported as a pin conflict and not kept. Files are applied in package
+dependency order, the project file last, and `frankenphp:audit` names the
+origin: `config:my_ext`, `pinned:config:my_ext`, `pattern:config:project`.
+
+**3. Reset a pinned service per request** — the files carry no closures.
+Listen to `WorkerRequestStartingEvent` (dispatched after the discard and the
+built-in resets, with the container) and clear the state there.
+
 ### Known limitations
 
 - Kept services hold the `Logger` they received at boot; log lines from those
   loggers carry the boot request id.
 - `displayErrors=-1` (devIPmask) is evaluated once at boot.
 - `GeneralUtility::setSingletonInstance()` calls from `ext_localconf.php` do not
-  survive the per-request purge; use the `frankenphp.keep` tag or listen to
-  `WorkerRequestStartingEvent`.
+  survive the per-request purge; use the `frankenphp.keep` tag, a
+  `Configuration/FrankenPhpWorker.php` or listen to `WorkerRequestStartingEvent`.
 - Static properties cannot be reset by discarding instances. The audit reports
   them (`static: …`); Core ones that carry request data are reset explicitly.
 - The first request after a worker boot or a MAX_REQUESTS recycle pays the
