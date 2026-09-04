@@ -59,6 +59,8 @@ npm run load:spike           # 90 s 0→200→0 — burst recovery
 npm run load:soak            # 10 min sustained — memory-leak detection
 npm run load:backend         # 2 min authenticated nav
 npm run load:backend:soak    # 10 min — WorkerStateResetter regression detector
+npm run load:backend:recycle # ~2 min — MAX_REQUESTS boundary; restart FrankenPHP first
+npm run load:backend:multiuser # 3 min — admin + editor interleaved; catches cross-user leaks
 npm run load:install-tool    # 2 min — `?__typo3_install` failsafe path
 npm run load:mixed           # 5 min — 80% frontend + 20% backend
 ```
@@ -81,13 +83,15 @@ uses, so one env export covers both).
 | Script                  | Shape  | VUs  | Duration | What it measures                                                 |
 |-------------------------|--------|------|----------|------------------------------------------------------------------|
 | `frontend-smoke.js`     | smoke  | 1    | 30 s     | All Camino routes respond cleanly                                |
-| `frontend-load.js`      | load   | 20   | 2 min    | Steady-state anonymous throughput (p95 < 500 ms)                 |
+| `frontend-load.js`      | load   | 20   | 2 min    | Steady-state anonymous throughput                                |
 | `frontend-stress.js`    | stress | →100 | ~5 min   | Worker-pool saturation inflection point                          |
 | `frontend-spike.js`     | spike  | →200 | 90 s     | Recovery from sudden burst                                       |
 | `frontend-soak.js`      | soak   | 10   | 10 min   | Memory-leak / opcache-bloat detection                            |
 | `backend-smoke.js`      | smoke  | 1    | 30 s     | Login + Web>Layout sanity                                        |
 | `backend-load.js`       | load   | 5    | 2 min    | Auth + nav throughput (lower VUs — session table serialises)     |
 | `backend-soak.js`       | soak   | 5    | 10 min   | WorkerStateResetter stability over thousands of authed requests |
+| `backend-recycle.js`    | recycle| 1    | ~2 min   | MAX_REQUESTS + 50 sequential authed GETs across a worker recycle |
+| `backend-multiuser.js`  | load   | 2+2  | 3 min    | Admin and restricted editor interleaved on the same workers; role markers must never leak |
 | `install-tool-smoke.js` | smoke  | 1    | 30 s     | `?__typo3_install` routes to failsafe                            |
 | `install-tool-load.js`  | load   | 10   | 2 min    | Per-request `/index.php` path under load                         |
 | `mixed-workload.js`     | load   | 8+2  | 5 min    | Realistic 80/20 mix in one run                                   |
@@ -100,9 +104,12 @@ k6 prints a text summary at the end of each run. The numbers that
 matter:
 
 - **`http_req_duration`** — `avg`, `p(50)`, `p(90)`, `p(95)`, `p(99)`,
-  `max`. For anonymous frontend, expect `p(95) < 500 ms` on a healthy
-  worker-mode setup. Authenticated backend traffic doubles that
-  (WorkerStateResetter runs per request).
+  `max`. The gates live in `lib/thresholds.js` and are deliberately loose
+  (p95 < 1 s frontend, < 2 s backend, < 3 s under saturation) because
+  they also run on noisy CI runners. On the dev sandbox (2 workers,
+  SQLite, Apple Silicon) a healthy setup is an order of magnitude below
+  the gates: frontend p95 ≈ 45 ms, backend p95 ≈ 40 ms. Anything near a
+  gate is a real problem, not marginal.
 - **`http_req_failed.rate`** — fraction of requests that returned a
   network error or 5xx. Should be `< 0.01` for smoke/load/soak.
 - **`checks.rate`** — fraction of `check()` assertions that passed.
@@ -110,17 +117,28 @@ matter:
 
 ### What "good" looks like
 
-| Scenario        | p95                              | failed rate         | checks     |
-|-----------------|----------------------------------|---------------------|------------|
-| frontend-smoke  | < 200 ms                         | 0                   | 1.0        |
-| frontend-load   | < 500 ms                         | < 0.01              | 1.0        |
-| frontend-stress | < 3 s peak                       | < 0.10 peak         | > 0.9 peak |
-| frontend-spike  | < 5 s during burst, normal after | < 0.10 during burst | > 0.9      |
-| frontend-soak   | flat over 10 min, < 500 ms       | 0                   | 1.0        |
-| backend-smoke   | < 1 s                            | 0                   | 1.0        |
-| backend-load    | < 1 s                            | < 0.02              | > 0.98     |
-| backend-soak    | flat, < 1 s                      | < 0.02              | > 0.98     |
-| install-tool    | < 1.5 s                          | 0                   | 1.0        |
+The left columns are the gates from `lib/thresholds.js` (what makes k6 exit
+non-zero); the right column is what the dev sandbox actually measures, so a
+run that passes the gate but sits far above the sandbox figure still deserves
+a look.
+
+| Scenario        | p95 gate          | failed-rate gate | checks gate | dev sandbox (2 workers) |
+|-----------------|-------------------|------------------|-------------|-------------------------|
+| frontend-smoke  | < 1 s             | < 0.01           | > 0.99      | p95 ≈ 20 ms             |
+| frontend-load   | < 1 s             | < 0.01           | > 0.99      | p95 ≈ 45 ms             |
+| frontend-soak   | < 1 s, flat       | < 0.01           | > 0.99      | see Documentation/WorkerMode.md |
+| frontend-stress | < 3 s             | < 0.10           | > 0.90      | saturates by design     |
+| frontend-spike  | < 3 s             | < 0.10           | > 0.90      | must recover in cool-down |
+| backend-smoke   | < 2 s             | < 0.02           | > 0.98      | p95 ≈ 40 ms             |
+| backend-load    | < 2 s             | < 0.02           | > 0.98      | p95 ≈ 40 ms             |
+| backend-soak    | < 2 s, flat       | < 0.02           | > 0.98      | see Documentation/WorkerMode.md |
+| backend-recycle | (none)            | == 0             | > 0.99      | 3-4 misses per boundary |
+| backend-multiuser | < 2 s           | < 0.02           | > 0.98      | any check failure is a cross-user leak |
+| install-tool    | < 3 s             | < 0.01           | > 0.99      | per-request PHP, slower by design |
+| mixed-workload  | fe < 0.5 s, be < 1 s (untagged) | < 0.02 | > 0.98 | no warmup: first request counts |
+
+CI runs only the three smoke scenarios (`.github/workflows/ci.yml`, "Load
+testing" job); everything else is run by hand.
 
 ### Regression patterns (what to look for)
 
@@ -137,8 +155,6 @@ matter:
   worked but the very first authenticated request crashed (typical
   WorkerStateResetter regression — see the file's existing comments
   for what fields it resets).
-
----
 
 ## Output formats
 
@@ -206,11 +222,28 @@ when finished.
   ImageMagick is hitting a path TYPO3 can't resolve, or the host is
   resource-constrained. Run `frontend-stress.js` to find the inflection
   point; raising the worker count past that has diminishing returns.
-- **Soak scenarios show stable latency for 8 min then a spike** →
-  classic GC stop-the-world from leaked singletons. Capture
-  `--out json=soak.ndjson` and inspect the timestamps around the spike;
-  cross-reference `Classes/Worker/WorkerStateResetter.php` resets to
-  see what state might have grown without being cleared.
+- **Soak scenarios show stable latency then a single slow request** →
+  first suspect the MAX_REQUESTS recycle, not GC. With the dev profile
+  (`MAX_REQUESTS=500`, 2 workers) a 10 min soak crosses the boundary
+  every ~1000 requests; the replacement worker's first request pays the
+  boot cost (up to ~2 s on the backend, a few hundred ms on the
+  frontend). A recycle shows up as one `max` outlier with p95 unchanged
+  and `X-FrankenPHP-Discarded` dropping back to the post-boot value on
+  the next sample. Sustained p95 drift across minutes is the leak
+  signal; capture `--out json=soak.ndjson` and bucket per minute to tell
+  the two apart.
+- **Backend module checks pass although the module never rendered** →
+  module routes need the per-session route token. A tokenless GET on
+  `/typo3/module/...` is redirected to `/typo3/login`, k6 follows it,
+  and a 200 login page satisfies `okStatus`. Use `moduleUrl()` from
+  `lib/auth.js` (harvests the tokenised link from the module menu) and
+  add `looksLikeModule` to the check set, as the backend scenarios do.
+- **`BreadcrumbFactory: Page record array must contain uid` warnings in
+  `var/log/typo3_*.log`** → Core's `BreadcrumbFactory::forPageArray()`
+  logs this whenever a breadcrumb is built from a page array without a
+  `uid`; it shows up with normal backend browser navigation as well and
+  is unrelated to worker mode. Harmless noise; do not count it as a
+  scenario failure.
 
 ---
 

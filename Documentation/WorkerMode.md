@@ -80,6 +80,13 @@ Vendor\Ext\Service\PerRequestThing:
   `WorkerRequestStartingEvent`.
 - Static properties cannot be reset by discarding instances. The audit reports
   them (`static: …`); Core ones that carry request data are reset explicitly.
+- The first request after a worker boot or a MAX_REQUESTS recycle pays the
+  boot cost (up to ~2 s on the backend). Size `MAX_REQUESTS` so recycles are
+  rare relative to traffic, and warm the pool before measuring.
+- Cross-user leaks (permissions, module menu, toolbar items) only surface when
+  requests of different users interleave on the same worker. Single-user load
+  tests cannot see them; run `backend-multiuser.js` and the Playwright
+  `storage-permission-isolation` / `cross-user-menu-toolbar-isolation` specs.
 
 ## Performance
 
@@ -107,6 +114,38 @@ k6 load scenarios (`Tests/load`, 2 minutes each):
 | --- | --- | --- |
 | frontend-load, 20 VU, p95 | 35.7 ms | 44.4 ms (100 % checks) |
 | backend-load, 5 VU, p95 | 27.9 ms (4.3 % checks failed: unpatched form-protection redirect loop) | 39.0 ms (100 % checks) |
+
+### Load test results (2026-09-04, dev sandbox, 2 workers, MAX_REQUESTS=500)
+
+All heavy scenarios from `Tests/load` against a freshly started worker pool,
+`X-FrankenPHP-Discarded` sampled every 10 s alongside the FrankenPHP process RSS:
+
+| Scenario | Result | Notes |
+| --- | --- | --- |
+| frontend-soak, 10 VU x 10 min | 5860 req, 0 failed, 100 % checks | p95 per minute 28-40 ms, no drift; two `max` outliers (371 / 645 ms) at recycle boundaries |
+| backend-soak, 5 VU x 10 min | 13440 req, 0 failed, 100 % checks | p95 per minute 28-42 ms, no drift; minute 0 `max` 2.0 s = first request after boot |
+| mixed-workload, 8 + 2 VU x 5 min | 0 failed, 100 % checks | frontend p95 30 ms, backend p95 28 ms |
+| frontend-stress, ramp to 100 VU | 18628 req, 0 failed, 100 % checks | p95 11 ms; the 2-worker pool queues, it does not fail |
+| frontend-spike, 200 VU burst | 18309 req, 0 failed, 100 % checks | p95 1.05 s during the burst, 49 ms in the cool-down |
+| backend-recycle, 550 sequential GETs | 1653 req, 0 failed, 100 % checks | fresh worker pool; no request missed the backend shell at the recycle boundary in this run |
+| backend-multiuser, 2 admin + 2 editor VU x 3 min | 7228 req, 0 failed, 100 % checks | role markers (module menu, clear-cache dropdown, storage root access) never crossed users |
+
+Process memory: 100-130 MB at rest, 240-260 MB during stress, 340 MB peak
+during the spike, back to ~130-140 MB afterwards. The rest value crept from
+~100 MB to ~135 MB over 30 minutes of mixed load; the discard count stayed at
+its post-boot value for every request type (58 backend AJAX, 72-80 pages), so
+the growth is allocator retention across recycles, not retained services.
+No worker errors; the only new log entries were Core's breadcrumb warnings
+for non-existent page ids.
+
+### What a recycle looks like
+
+With `MAX_REQUESTS=500` a worker exits after 500 requests and FrankenPHP boots
+a replacement. In the measurements above that costs one request per boundary
+(a few hundred ms on the frontend, up to 2 s for the first backend request)
+and 3-4 requests per boundary that miss the backend shell in
+`backend-recycle.js`. Neither affects p95. Treat a `max` outlier without a
+p95 change as a recycle, and sustained per-minute drift as a leak.
 
 ## Findings worth fixing in Core
 
