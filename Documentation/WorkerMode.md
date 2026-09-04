@@ -81,6 +81,33 @@ Vendor\Ext\Service\PerRequestThing:
 - Static properties cannot be reset by discarding instances. The audit reports
   them (`static: …`); Core ones that carry request data are reset explicitly.
 
+## Performance
+
+Measured on the dev sandbox (SQLite, 2 workers, TYPO3 14.3.4, PHP 8.5, Apple Silicon).
+`ab -n 600 -c 4` against a cached-page-free frontend URL, 600 requests each:
+
+| Variant | req/s | mean | p95 |
+| --- | --- | --- | --- |
+| discard-by-default, full `cache.runtime` flush | 227 | 17.6 ms | 22 ms |
+| discard-by-default, **no** runtime cache flush (incorrect: serves stale rows) | 530 | 7.5 ms | 11 ms |
+| discard-by-default, selective flush (labels + table info kept) — **shipped** | 286 | 14.0 ms | 16 ms |
+
+The reset itself (`X-FrankenPHP-Reset-Us`) costs 0.3 ms per request; re-instantiating
+the ~50-100 discarded services is not measurable. The cost is recomputing what
+Core memoises in `cache.runtime`: page rows, rootlines, cache lifetimes, menus,
+TSconfig. PHP-FPM recomputes all of it on every request too, so this is the
+honest per-request price; the old blacklist implementation was faster only
+because it kept those rows across requests and served stale data. If a site
+needs the old numbers back, `KeepList::RUNTIME_CACHE_KEEP_PATTERNS` is the
+knob, and every pattern added there is a conscious staleness trade-off.
+
+k6 load scenarios (`Tests/load`, 2 minutes each):
+
+| Scenario | old blacklist | discard-by-default (shipped) |
+| --- | --- | --- |
+| frontend-load, 20 VU, p95 | 35.7 ms | 44.4 ms (100 % checks) |
+| backend-load, 5 VU, p95 | 27.9 ms (4.3 % checks failed: unpatched form-protection redirect loop) | 39.0 ms (100 % checks) |
+
 ## Findings worth fixing in Core
 
 Found while curating the keep-list; each one is invisible under PHP-FPM

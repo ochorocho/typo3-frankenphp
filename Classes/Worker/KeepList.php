@@ -126,6 +126,24 @@ final class KeepList
         '/^cache\./' => 'cache-frontend',
     ];
 
+    /**
+     * cache.runtime entries that may survive a request. Everything else is
+     * flushed per request (which is what PHP-FPM's process death did).
+     * Only list keys whose content depends on files that a deployment
+     * changes anyway (labels come from cache.l10n / XLF files, table info
+     * from the DB schema), never anything derived from records or site
+     * configuration: those are edited through the backend at runtime and a
+     * change made on one worker is invisible to the runtime cache of the
+     * others. Measured on the sandbox frontend: keeping these two groups
+     * recovers roughly a quarter of the cost of a full flush.
+     *
+     * @var list<string> regular expressions matched against the entry key
+     */
+    public const array RUNTIME_CACHE_KEEP_PATTERNS = [
+        '/^labels_/',
+        '/^generic_[0-9a-f]+-tableinfo-cache_/',
+    ];
+
     /** @var list<string> */
     public const array RESEED = [
         \TYPO3\CMS\Core\Page\PageRenderer::class,
