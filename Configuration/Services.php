@@ -4,12 +4,19 @@ declare(strict_types=1);
 
 namespace Ochorocho\FrankenPhp;
 
+use Ochorocho\FrankenPhp\DependencyInjection\WorkerKeepListPass;
 use Ochorocho\FrankenPhp\Widget\PrometheusMetricsWidget;
+use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use TYPO3\CMS\Dashboard\WidgetRegistry;
 
 return static function (ContainerConfigurator $container, ContainerBuilder $containerBuilder): void {
+    // Classify services for the worker lifecycle. Must run after Symfony's
+    // removing passes (inlining done, reference graph final) and before
+    // RemoveBuildParametersPass at -2048.
+    $containerBuilder->addCompilerPass(new WorkerKeepListPass(), PassConfig::TYPE_AFTER_REMOVING, -1024);
+
     // Dashboard widget registration is conditional on cms-dashboard being
     // installed — that package is listed as `suggest` in composer.json,
     // not `require`. The WidgetRegistry definition only exists when the
