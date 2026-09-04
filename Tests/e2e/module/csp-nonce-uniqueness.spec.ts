@@ -36,7 +36,7 @@ import {test, expect} from '@playwright/test';
  * Leaving the test in place (and skipped) keeps the failure documented
  * for whoever lands one of the fixes above.
  */
-test.fixme('CSP nonce rotates per request (worker-mode regression)', async ({page}) => {
+test('CSP nonce rotates per request (worker-mode regression)', async ({page}) => {
     const nonces = new Set<string>();
     for (let i = 0; i < 3; i++) {
         const response = await page.goto(`/typo3/main?nonce-probe=${i}`);

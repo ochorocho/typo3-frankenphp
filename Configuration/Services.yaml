@@ -8,9 +8,8 @@ services:
     resource: '../Classes/*'
 
   # Worker bootstrap pulls this from the container directly, so it must be public.
-  Ochorocho\FrankenPhp\Worker\StateSnapshotService:
+  Ochorocho\FrankenPhp\Worker\WorkerStateResetter:
     public: true
-    shared: true
 
   # Backend AJAX controllers — TYPO3's route dispatcher resolves the target
   # class from the container if it's a public service; otherwise it falls
