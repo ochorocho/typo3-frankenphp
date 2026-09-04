@@ -9,9 +9,11 @@ use Ochorocho\FrankenPhp\Event\WorkerRequestStartingEvent;
 use Psr\Container\ContainerInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\DependencyInjection\Container as SymfonyContainer;
+use TYPO3\CMS\Backend\Resource\PublicUrlPrefixer as BackendPublicUrlPrefixer;
 use TYPO3\CMS\Core\Context\Context;
 use TYPO3\CMS\Core\Core\RequestId;
 use TYPO3\CMS\Core\Database\ConnectionPool;
+use TYPO3\CMS\Core\DataHandling\DataHandler;
 use TYPO3\CMS\Core\Log\LogManager;
 use TYPO3\CMS\Core\MetaTag\MetaTagManagerRegistry;
 use TYPO3\CMS\Core\Page\AssetCollector;
@@ -19,6 +21,7 @@ use TYPO3\CMS\Core\Page\PageRenderer;
 use TYPO3\CMS\Core\Resource\Filter\FileNameFilter;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\CMS\Frontend\ContentObject\Menu\MenuContentObjectFactory;
+use TYPO3\CMS\Frontend\Resource\PublicUrlPrefixer as FrontendPublicUrlPrefixer;
 
 /**
  * Brings the worker process back to its post-boot state before every request.
@@ -72,6 +75,7 @@ final readonly class WorkerStateResetter
         // Process-wide static flag any file listing consults; a privileged
         // user toggling it must not leak into the next user's request.
         FileNameFilter::setShowHiddenFilesAndFolders(false);
+        $this->resetStaticCoreState();
 
         $discarded = 0;
         if ($container instanceof SymfonyContainer) {
@@ -202,6 +206,33 @@ final readonly class WorkerStateResetter
     {
         if ($container->has(PageRenderer::class)) {
             $container->get(PageRenderer::class)->updateState($snapshot->pageRendererState);
+        }
+    }
+
+    /**
+     * Static properties survive instance discarding. These are the Core
+     * statics that carry per-request data and are only cleared on the
+     * happy path; an exception mid-request leaves them dirty.
+     */
+    private function resetStaticCoreState(): void
+    {
+        // Cache-clear queue: committed by processClearCacheQueue() at the end
+        // of a successful DataHandler run. Left over after an exception, the
+        // next request's DataHandler flushes pages it never touched.
+        \Closure::bind(static function (): void {
+            DataHandler::$recordsToClearCacheFor = [];
+            DataHandler::$recordPidsForDeletedRecords = [];
+        }, null, DataHandler::class)();
+
+        // Re-entrancy guard around public URL prefixing. Sticky `true` after
+        // an exception silently disables prefixing for the worker's lifetime.
+        foreach ([BackendPublicUrlPrefixer::class, FrontendPublicUrlPrefixer::class] as $prefixer) {
+            if (!class_exists($prefixer)) {
+                continue;
+            }
+            \Closure::bind(static function () use ($prefixer): void {
+                $prefixer::$isProcessingUrl = false;
+            }, null, $prefixer)();
         }
     }
 

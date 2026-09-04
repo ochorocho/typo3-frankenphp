@@ -226,6 +226,11 @@ final class WorkerKeepListPass implements CompilerPassInterface
             $this->pinned[$id] = true;
             $this->report[$id]['category'] = self::CATEGORY_KEEP;
             $this->report[$id]['reason'] = $id === $root ? 'pinned' : 'pinned-via:' . $root;
+            // Instances collected through iterators / locators are invisible
+            // to the closure check; flag them so the audit reader looks twice.
+            if ($this->holdsLazyCollection($container->getDefinition($id))) {
+                $this->report[$id]['reason'] .= ' (holds lazily collected instances)';
+            }
         }
     }
 
@@ -376,6 +381,20 @@ final class WorkerKeepListPass implements CompilerPassInterface
             }
         }
         return null;
+    }
+
+    private function holdsLazyCollection(Definition $definition): bool
+    {
+        $values = [$definition->getArguments()];
+        foreach ($definition->getMethodCalls() as $call) {
+            $values[] = $call[1] ?? [];
+        }
+        array_walk_recursive($values, static function (mixed $value) use (&$found): void {
+            if ($value instanceof ArgumentInterface) {
+                $found = true;
+            }
+        });
+        return $found ?? false;
     }
 
     private function isSafeInlineClass(string $class): bool

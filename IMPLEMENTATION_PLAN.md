@@ -32,10 +32,10 @@ k6 soak scenarios pass; discarded count stable across requests.
 upstream references; storage permission isolation covered by e2e.
 **Success Criteria**: audit clean; e2e + k6 green.
 **Tests**: `storage-permission-isolation.spec.ts`
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 5: Performance budget and cleanup
 **Goal**: k6 before/after within budget (p95 +10 %, throughput -10 %); docs updated.
 **Success Criteria**: numbers recorded; CLAUDE.md / README updated; this file removed.
 **Tests**: `Tests/load/frontend-load.js`, `backend-load.js`
-**Status**: Not Started
+**Status**: In Progress

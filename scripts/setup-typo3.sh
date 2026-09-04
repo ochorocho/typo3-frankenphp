@@ -16,6 +16,9 @@ TYPO3_VERSION="${TYPO3_VERSION:-^14.3}"
 export TYPO3_SETUP_ADMIN_USERNAME="${TYPO3_SETUP_ADMIN_USERNAME:-admin}"
 export TYPO3_SETUP_ADMIN_PASSWORD="${TYPO3_SETUP_ADMIN_PASSWORD:-Password.1}"
 export TYPO3_SETUP_ADMIN_EMAIL="${TYPO3_SETUP_ADMIN_EMAIL:-typo3@example.com}"
+# Non-admin editor used by Tests/e2e/module/storage-permission-isolation.spec.ts
+export TYPO3_E2E_EDITOR_USERNAME="${TYPO3_E2E_EDITOR_USERNAME:-editor}"
+export TYPO3_E2E_EDITOR_PASSWORD="${TYPO3_E2E_EDITOR_PASSWORD:-Password.1}"
 export TYPO3_PROJECT_NAME="${TYPO3_PROJECT_NAME:-typo3-frankenphp}"
 export TYPO3_SERVER_TYPE="${TYPO3_SERVER_TYPE:-other}"
 export TYPO3_DB_DRIVER="sqlite"
@@ -151,6 +154,36 @@ run_typo3_setup() {
     rm -rf "${BUILD_DIR}/var/cache" 2>/dev/null || true
 }
 
+# Seed e2e fixtures: a non-admin editor whose only file mount is
+# 1:/user_upload/. Idempotent; the storage-permission-isolation spec
+# alternates this user with the admin on the same worker.
+seed_e2e_fixtures() {
+    local db mount group
+    db=$(ls "${BUILD_DIR}"/var/sqlite/*.sqlite 2>/dev/null | head -n 1)
+    [ -n "${db}" ] || { warn "No sqlite database found, skipping e2e fixtures."; return 0; }
+
+    log "Seeding e2e fixtures (editor user with restricted file mount) ..."
+    sqlite3 "${db}" "INSERT INTO sys_filemounts (pid, title, identifier, read_only) \
+        SELECT 0, 'e2e user_upload', '1:/user_upload/', 0 \
+        WHERE NOT EXISTS (SELECT 1 FROM sys_filemounts WHERE title = 'e2e user_upload');"
+    mount=$(sqlite3 "${db}" "SELECT uid FROM sys_filemounts WHERE title = 'e2e user_upload';")
+    # workspace_perms=1: live workspace access, otherwise the user lands in
+    # workspace -99 and every workspace AJAX call fails.
+    sqlite3 "${db}" "INSERT INTO be_groups (pid, title, file_mountpoints, file_permissions, groupMods, workspace_perms) \
+        SELECT 0, 'e2e editors', '${mount}', 'readFolder,readFile', 'media,media_management', 1 \
+        WHERE NOT EXISTS (SELECT 1 FROM be_groups WHERE title = 'e2e editors');"
+    group=$(sqlite3 "${db}" "SELECT uid FROM be_groups WHERE title = 'e2e editors';")
+    if [ "$(sqlite3 "${db}" "SELECT count(*) FROM be_users WHERE username = '${TYPO3_E2E_EDITOR_USERNAME}';")" = "0" ]; then
+        (cd "${BUILD_DIR}" && vendor/bin/typo3 backend:user:create \
+            -u "${TYPO3_E2E_EDITOR_USERNAME}" -p "${TYPO3_E2E_EDITOR_PASSWORD}" \
+            -e "editor@example.com" -g "${group}" --no-interaction)
+    fi
+    # options=3: inherit DB and file mounts from groups. workspace_id=0: the
+    # create command defaults to -99, which the editor has no permission for.
+    sqlite3 "${db}" "UPDATE be_users SET usergroup = '${group}', options = 3, admin = 0, workspace_id = 0 \
+        WHERE username = '${TYPO3_E2E_EDITOR_USERNAME}';"
+}
+
 # Configure ImageMagick path
 configure_imagemagick() {
     [ -f "${ADDITIONAL_PHP}" ] && return   # respect existing user customization
@@ -232,6 +265,7 @@ check_prerequisites
 generate_composer_json
 ensure_composer_install
 run_typo3_setup
+seed_e2e_fixtures
 configure_imagemagick
 cleanup_processedfile
 

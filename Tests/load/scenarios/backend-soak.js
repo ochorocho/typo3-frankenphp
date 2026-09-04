@@ -4,7 +4,7 @@
  * The single most worker-mode-relevant scenario in the suite. Each
  * iteration hits the backend ~3 times, so over 10 min × 5 VUs ≈ a few
  * thousand authenticated requests, all of which run through
- * StateSnapshotService::restore(). Any singleton state that fails to
+ * WorkerStateResetter::reset(). Any singleton state that fails to
  * reset cleanly per request will accumulate and show up as:
  *
  *   - latency drift across the window (memory pressure / GC),
@@ -51,7 +51,7 @@ export default function () {
     sleep(1);
 
     // Cycle the page tree so ContentFetcher's cache.runtime keys would
-    // accumulate without the reset in StateSnapshotService. If the
+    // accumulate without the reset in WorkerStateResetter. If the
     // singleton reset regresses, this scenario surfaces it as wrong
     // content (and check failures) within minutes.
     for (const id of [1, 5, 6, 7]) {

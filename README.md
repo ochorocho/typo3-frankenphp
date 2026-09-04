@@ -58,6 +58,21 @@ per-request PHP execution (e.g. the install-tool recovery URL via `/index.php`).
 the skeleton elephant from `frankenphp.dev`). Use it to quickly verify that requests you expect to hit the worker
 actually do.
 
+### Which services survive a request?
+
+```bash
+vendor/bin/typo3 frankenphp:audit            # grouped summary + full table
+vendor/bin/typo3 frankenphp:audit --summary  # counts and the top demotion causes only
+vendor/bin/typo3 frankenphp:audit --format=markdown --filter=Extbase
+```
+
+Worker mode is discard-by-default: every DI service instance that is not provably stateless (or explicitly pinned)
+is dropped at the start of each request and rebuilt lazily by the compiled container. The audit prints the
+classification with reasons so you can see why a service is kept or discarded and tune it via the
+`frankenphp.keep` / `frankenphp.discard` service tags. In Development context every response carries an
+`X-FrankenPHP-Discarded` header with the number of instances dropped before the request. Details:
+[Documentation/WorkerMode.md](Documentation/WorkerMode.md).
+
 ## Prometheus metrics dashboard widget
 
 Run `vendor/bin/typo3 frankenphp:init --prometheus` (add `--force` to overwrite an existing Caddyfile / `.env`). This
@@ -122,11 +137,12 @@ This repository is the **extension package**, not a TYPO3 installation. A throwa
 
 | Folder               | Purpose                                                                                                                                                                                                                                                                                                                                                     |
 |----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Classes/`           | Extension PHP source — `Command/` (`frankenphp:init`), `Controller/Backend/` (metrics AJAX proxy), `Service/` (`PrometheusTextParser`), `Widget/` (`PrometheusMetricsWidget`), `Worker/` (`StateSnapshotService` — survives singleton state across worker requests), `EventListener/`, `Middleware/`, `Event/`, `Composer/` (TYPO3 installer-scripts hook). |
+| `Classes/`           | Extension PHP source — `Command/` (`frankenphp:init`), `Controller/Backend/` (metrics AJAX proxy), `Service/` (`PrometheusTextParser`), `Widget/` (`PrometheusMetricsWidget`), `Worker/` (`WorkerStateResetter` + `KeepList` — per-request reset of the worker process), `DependencyInjection/` (`WorkerKeepListPass` — compile-time keep/discard classification), `EventListener/`, `Middleware/`, `Event/`, `Composer/` (TYPO3 installer-scripts hook). |
 | `Configuration/`     | TYPO3 service wiring (`Services.yaml`, `Services.php`), `Backend/AjaxRoutes.php`, `Backend/DashboardWidgetGroups.php`, `Backend/DashboardPresets.php`, `JavaScriptModules.php`, `Icons.php`, `RequestMiddlewares.php`.                                                                                                                                      |
 | `Resources/Private/` | Fluid templates (`Templates/Widget/`), `Language/` XLF files, and `Php/worker.php` — the template `InitCommand` copies into the user's `public/`.                                                                                                                                                                                                           |
 | `Resources/Public/`  | Frontend assets — `JavaScript/widget/` (Chart.js-backed Lit web component for the metrics widget), `Css/widget/`, `Icons/`.                                                                                                                                                                                                                                 |
-| `Tests/`             | `e2e/` Playwright suite (correctness) and `load/` k6 scenarios (performance + worker stability). Each has its own README.                                                                                                                                                                                                                                   |
+| `Tests/`             | `Unit/` PHPUnit tests for the compiler pass, `e2e/` Playwright suite (correctness) and `load/` k6 scenarios (performance + worker stability). Each has its own README.                                                                                                                                                                                       |
+| `Documentation/`     | `WorkerMode.md` — the service lifecycle model and the audited list of Core services for worker mode.                                                                                                                                                                                                                                                       |
 | `scripts/`           | Developer bootstrap — `setup-typo3.sh` materializes the `Build/` sandbox.                                                                                                                                                                                                                                                                                   |
 | `Build/`             | **Gitignored.** Throwaway TYPO3 install for development. `Build/composer.json` requires this extension via a Composer path repository pointing at `../`, so edits to root `Classes/` / `Resources/` / `Configuration/` affect the sandbox immediately.                                                                                                      |
 
@@ -177,19 +193,21 @@ cd Build && vendor/bin/typo3 frankenphp:init --no-interaction --force
 
 ### Static analysis & code style
 
-Dev dependencies are pinned in `Build/composer.json`, not the root package — run the tools from inside `Build/`:
+Dev dependencies are in the root `composer.json`; run the tools from the repository root:
 
 ```bash
-cd Build && vendor/bin/phpstan analyse ../Classes
-cd Build && vendor/bin/php-cs-fixer fix ../Classes
+vendor/bin/phpstan analyse --memory-limit=1G
+vendor/bin/php-cs-fixer fix --config=php-cs-fixer.php
+vendor/bin/phpunit
 ```
 
 ### Tests
 
 | Suite                   | Location      | What it covers                                                                                                                                 |
 |-------------------------|---------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| End-to-end (Playwright) | `Tests/e2e/`  | Backend correctness against the running sandbox. See `Tests/README.md`.                                                                        |
-| Load / soak (k6)        | `Tests/load/` | Throughput, tail latency, and (most importantly) the regression net for `Classes/Worker/StateSnapshotService.php`. See `Tests/load/README.md`. |
+| Unit (PHPUnit)          | `Tests/Unit/` | `WorkerKeepListPass` classification and dependency-closure rules against a small fixture container.                                             |
+| End-to-end (Playwright) | `Tests/e2e/`  | Backend correctness against the running sandbox, including cross-user isolation on a shared worker. See `Tests/README.md`.                      |
+| Load / soak (k6)        | `Tests/load/` | Throughput, tail latency, and (most importantly) the regression net for `Classes/Worker/WorkerStateResetter.php`. See `Tests/load/README.md`.  |
 
 ### Submitting changes
 

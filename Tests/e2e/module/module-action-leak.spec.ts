@@ -3,7 +3,7 @@ import {test, expect} from '@playwright/test';
 // Regression test for the worker-mode MenuRegistry leak:
 // visiting a backend module that registers a DocHeader MenuRegistry dropdown
 // left the dropdown in the SHARED singleton, so subsequent modules emitted
-// a ghost dropdown beside their own. Fixed in StateSnapshotService by
+// a ghost dropdown beside their own. Fixed in WorkerStateResetter by
 // clearing MenuRegistry's $menus[] via the DocHeader getter on every
 // worker request.
 //

@@ -10,7 +10,7 @@ const SECURITY_TOKEN_RE = /Validating the security token of this form has failed
  * End-to-end regression for cross-session state isolation in worker mode.
  *
  * Until the FormProtectionFactory composer patch + `UriBuilder->$generated`
- * reset + the singleton resets in `Classes/Worker/StateSnapshotService.php`
+ * reset + the singleton resets in `Classes/Worker/WorkerStateResetter.php`
  * all landed together, the dev sandbox could not survive a logout +
  * re-login cycle on the same worker: the second login's signed
  * /typo3/main?token=… URL was validated against the previous session's
@@ -35,7 +35,7 @@ const SECURITY_TOKEN_RE = /Validating the security token of this form has failed
  * the fixes in place this passes deterministically; reverting any of the
  * three pieces (FormProtectionFactory patch, UriBuilder reset, or the
  * audit-added singleton resets) is enough to reintroduce the redirect
- * loop. See `Classes/Worker/StateSnapshotService.php` for the full
+ * loop. See `Classes/Worker/WorkerStateResetter.php` for the full
  * inventory of what's reset and why.
  */
 

@@ -9,7 +9,7 @@ import {test, expect} from '@playwright/test';
  * `cache.runtime` is wiped at process death, so this is harmless. Under
  * FrankenPHP worker mode the cache survives across requests; clicking page B in
  * the page tree returns page A's still-cached content. Fixed by flushing
- * `cache.runtime` per request in `StateSnapshotService::restore()`.
+ * `cache.runtime` per request in `WorkerStateResetter::reset()`.
  *
  * This test clicks two pages with disjoint content and asserts the second
  * page's content elements appear AND the first page's do NOT — which is the

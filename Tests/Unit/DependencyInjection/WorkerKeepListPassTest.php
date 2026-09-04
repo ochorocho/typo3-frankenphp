@@ -58,6 +58,7 @@ final class WorkerKeepListPassTest extends TestCase
         $this->register($builder, HolderOfIterator::class, [new IteratorArgument([new Reference(MutableService::class)])]);
         $this->register($builder, PinnedDependency::class);
         $this->register($builder, PinnedRoot::class, [new Reference(PinnedDependency::class)]);
+        $this->register($builder, 'pinned.collector', [new IteratorArgument([new Reference(MutableService::class)])], HolderOfIterator::class);
         $this->register($builder, PinConflictRoot::class, [new Reference(RequestId::class)]);
         $this->register($builder, DependsOnPinConflictRoot::class, [new Reference(PinConflictRoot::class)]);
         $this->register($builder, HolderOfInlinedMutable::class, [new Definition(MutableService::class)]);
@@ -68,7 +69,7 @@ final class WorkerKeepListPassTest extends TestCase
 
         $builder->addCompilerPass(
             new WorkerKeepListPass(
-                pinnedServices: [PinnedRoot::class, PinConflictRoot::class],
+                pinnedServices: [PinnedRoot::class, PinConflictRoot::class, 'pinned.collector'],
                 softServices: [],
                 discardServices: [],
                 discardPatterns: [],
@@ -159,6 +160,13 @@ final class WorkerKeepListPassTest extends TestCase
         self::assertSame('pinned', $this->report[PinnedRoot::class]['reason']);
         self::assertContains(PinnedDependency::class, $this->keep);
         self::assertSame('pinned-via:' . PinnedRoot::class, $this->report[PinnedDependency::class]['reason']);
+    }
+
+    #[Test]
+    public function pinnedHolderOfLazyCollectionIsFlagged(): void
+    {
+        self::assertContains('pinned.collector', $this->keep);
+        self::assertSame('pinned (holds lazily collected instances)', $this->report['pinned.collector']['reason']);
     }
 
     #[Test]
