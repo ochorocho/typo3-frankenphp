@@ -79,11 +79,14 @@ $handler = static function () use ($container, $resetter, $snapshot, $applicatio
                 . 'available in the container. Check config/system/settings.php and var/cache/.'
             );
         }
+        $resetStart = hrtime(true);
         $discarded = $resetter?->reset($snapshot, $container) ?? 0;
         if ($isDevelopment) {
-            // Tuning aid: how many service instances the previous request left
-            // behind. Should stabilise after warm-up; growth means a leak.
+            // Tuning aids: how many service instances the previous request left
+            // behind (should stabilise after warm-up; growth means a leak) and
+            // how long the reset itself took, in microseconds.
             header('X-FrankenPHP-Discarded: ' . $discarded);
+            header('X-FrankenPHP-Reset-Us: ' . intdiv(hrtime(true) - $resetStart, 1000));
         }
         $container->get($applicationClass)->run();
     } catch (\Throwable $e) {

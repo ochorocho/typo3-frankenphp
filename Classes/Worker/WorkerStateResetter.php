@@ -10,6 +10,8 @@ use Psr\Container\ContainerInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\DependencyInjection\Container as SymfonyContainer;
 use TYPO3\CMS\Backend\Resource\PublicUrlPrefixer as BackendPublicUrlPrefixer;
+use TYPO3\CMS\Core\Cache\Backend\TransientMemoryBackend;
+use TYPO3\CMS\Core\Cache\Frontend\FrontendInterface;
 use TYPO3\CMS\Core\Context\Context;
 use TYPO3\CMS\Core\Core\RequestId;
 use TYPO3\CMS\Core\Database\ConnectionPool;
@@ -176,10 +178,12 @@ final readonly class WorkerStateResetter
         // cache.runtime's backend is documented as "stores cache entries during
         // one script run". Core caches user- and page-bound data in it under
         // fixed keys (file mounts, backend layouts, workspace lists, form
-        // protection instances). It is registered with the CacheManager, so
-        // it cannot be discarded without creating a second instance: flush it.
+        // protection instances, page rows, rootlines). It is registered with
+        // the CacheManager, so it cannot be discarded without creating a
+        // second instance: flush it, keeping only the entries KeepList marks
+        // as request-independent.
         if ($container->has('cache.runtime')) {
-            $container->get('cache.runtime')->flush();
+            $this->flushRuntimeCache($container->get('cache.runtime'));
         }
 
         // Boot-populated registries with a public state API: replay the
@@ -194,6 +198,39 @@ final readonly class WorkerStateResetter
                 $menuFactory->menuTypeToClassMapping = $bootMapping;
             }, null, MenuContentObjectFactory::class)();
         }
+    }
+
+    /**
+     * Selective flush: every entry goes unless its key matches one of
+     * KeepList::RUNTIME_CACHE_KEEP_PATTERNS. Kept entries keep their tags.
+     * TransientMemoryBackend exposes no key enumeration, hence the bind.
+     */
+    private function flushRuntimeCache(FrontendInterface $runtimeCache): void
+    {
+        $backend = $runtimeCache->getBackend();
+        if (!$backend instanceof TransientMemoryBackend) {
+            $runtimeCache->flush();
+            return;
+        }
+        $patterns = KeepList::RUNTIME_CACHE_KEEP_PATTERNS;
+        \Closure::bind(static function () use ($backend, $patterns): void {
+            $removed = [];
+            foreach ($backend->entries as $key => $_) {
+                foreach ($patterns as $pattern) {
+                    if (preg_match($pattern, $key) === 1) {
+                        continue 2;
+                    }
+                }
+                unset($backend->entries[$key]);
+                $removed[$key] = true;
+            }
+            foreach ($backend->tagsAndEntries as $tag => $identifiers) {
+                $backend->tagsAndEntries[$tag] = array_diff_key($identifiers, $removed);
+                if ($backend->tagsAndEntries[$tag] === []) {
+                    unset($backend->tagsAndEntries[$tag]);
+                }
+            }
+        }, null, TransientMemoryBackend::class)();
     }
 
     /**

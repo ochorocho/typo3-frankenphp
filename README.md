@@ -69,8 +69,9 @@ vendor/bin/typo3 frankenphp:audit --format=markdown --filter=Extbase
 Worker mode is discard-by-default: every DI service instance that is not provably stateless (or explicitly pinned)
 is dropped at the start of each request and rebuilt lazily by the compiled container. The audit prints the
 classification with reasons so you can see why a service is kept or discarded and tune it via the
-`frankenphp.keep` / `frankenphp.discard` service tags. In Development context every response carries an
-`X-FrankenPHP-Discarded` header with the number of instances dropped before the request. Details:
+`frankenphp.keep` / `frankenphp.discard` service tags. In Development context every response carries two tuning
+headers: `X-FrankenPHP-Discarded` (instances dropped before the request; should stabilise after warm-up, growth means a
+leak) and `X-FrankenPHP-Reset-Us` (microseconds the reset took). Details, including measured costs:
 [Documentation/WorkerMode.md](Documentation/WorkerMode.md).
 
 ## Prometheus metrics dashboard widget
