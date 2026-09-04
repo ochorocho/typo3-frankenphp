@@ -66,16 +66,13 @@ vendor/bin/typo3 frankenphp:audit --summary  # counts and the top demotion cause
 vendor/bin/typo3 frankenphp:audit --format=markdown --filter=Extbase
 ```
 
-Run it inside a TYPO3 installation. In this repository that is the `Build/` sandbox, not the root (the root `vendor/`
-only holds the extension's dev dependencies, so the root `vendor/bin/typo3` fails with "`vendor/typo3/sysext/*/`
-does not exist"). `scripts/typo3` runs the sandbox CLI from anywhere:
-
-```bash
-scripts/typo3 frankenphp:audit --summary
-```
-
-The classification is computed when the DI container is compiled, so flush caches (`scripts/typo3 cache:flush`)
-after changing `KeepList` or service tags.
+In a TYPO3 project this is the project's `vendor/bin/typo3`. In this repository it also works from the root:
+`typo3/cms-composer-installers` is allowed in the root `composer.json`, so `composer install` generates the package
+artifact from the installed `typo3/cms-*` packages and the CLI boots without a `settings.php` (the extension's own
+installer script skips `frankenphp:init` when the root package is not a `typo3-cms-project`). The root run classifies
+Core plus the dev-dependency extensions; the `Build/` sandbox (`scripts/typo3 frankenphp:audit`) additionally covers
+whatever else is installed there. The classification is computed when the DI container is compiled, so flush
+caches (`vendor/bin/typo3 cache:flush`) after changing `KeepList` or service tags.
 
 Worker mode is discard-by-default: every DI service instance that is not provably stateless (or explicitly pinned)
 is dropped at the start of each request and rebuilt lazily by the compiled container. The audit prints the

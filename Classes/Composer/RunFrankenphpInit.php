@@ -22,6 +22,20 @@ final class RunFrankenphpInit implements InstallerScript
 {
     public function run(Event $event): bool
     {
+        // Only a TYPO3 project root gets the generated infrastructure. When
+        // the root package is an extension (this extension's own checkout,
+        // or another extension that depends on it for its dev setup) there is
+        // nothing to configure, and Caddyfile / .env / public/worker.php
+        // would land in the extension source tree.
+        if ($event->getComposer()->getPackage()->getType() !== 'typo3-cms-project') {
+            $event->getIO()->write(
+                'ochorocho/frankenphp: root package is not a typo3-cms-project, skipping frankenphp:init auto-run.',
+                true,
+                \Composer\IO\IOInterface::VERBOSE
+            );
+            return true;
+        }
+
         $vendorDir = (string)$event->getComposer()->getConfig()->get('vendor-dir');
         $binary = $vendorDir . '/bin/typo3';
         if (!is_executable($binary)) {
