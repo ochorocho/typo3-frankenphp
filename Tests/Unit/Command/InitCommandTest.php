@@ -45,6 +45,12 @@ final class InitCommandTest extends TestCase
         self::assertStringNotContainsString('E_STRICT', $this->generated('php.ini'));
         self::assertDoesNotMatchRegularExpression('/^opcache\.jit/m', $this->generated('php.ini'));
         self::assertMatchesRegularExpression('/^FRANKENPHP_WORKER_COUNT=([4-9]|[1-9][0-9]+)$/m', $this->generated('.env'));
+        // The Caddyfile placeholder defaults mirror .env: Caddy only reads .env with --envfile.
+        preg_match('/^FRANKENPHP_WORKER_COUNT=(\\d+)$/m', $this->generated('.env'), $m);
+        self::assertStringContainsString('{$FRANKENPHP_WORKER_COUNT:' . $m[1] . '}', $this->generated('Caddyfile'));
+        self::assertStringContainsString('{$HTTP_PORT:80}', $this->generated('Caddyfile'));
+        self::assertStringContainsString('{$HTTPS_PORT:443}', $this->generated('Caddyfile'));
+        self::assertStringContainsString('MAX_REQUESTS=10000', $this->generated('.env'));
     }
 
     #[Test]
@@ -55,6 +61,8 @@ final class InitCommandTest extends TestCase
         self::assertStringContainsString('TYPO3_CONTEXT=Development', $this->generated('.env'));
         self::assertStringContainsString("\tdebug\n", $this->generated('Caddyfile'));
         self::assertStringNotContainsString('admin off', $this->generated('Caddyfile'));
+        self::assertMatchesRegularExpression('/^FRANKENPHP_WORKER_COUNT=([2-9]|[1-9][0-9]+)$/m', $this->generated('.env'));
+        self::assertStringContainsString('{$HTTPS_PORT:8885}', $this->generated('Caddyfile'));
     }
 
     #[Test]
@@ -124,6 +132,7 @@ final class InitCommandTest extends TestCase
         $tester->execute($options, ['interactive' => false]);
 
         self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
+        self::assertStringContainsString('--envfile .env', $tester->getDisplay());
     }
 
     private function generated(string $file): string

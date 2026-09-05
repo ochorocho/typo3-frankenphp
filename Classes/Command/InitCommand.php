@@ -78,9 +78,9 @@ class InitCommand extends Command
         // dev ports they can still override interactively or via .env later.
         $defaults = $isProd
             ? ['httpPort' => 80, 'httpsPort' => 443, 'context' => 'Production',
-                'workerCount' => (string)max(4, 2 * $this->cpuCount()), 'maxRequests' => '1000']
+                'workerCount' => (string)max(4, 2 * $this->cpuCount()), 'maxRequests' => '10000']
             : ['httpPort' => 8888, 'httpsPort' => 8885, 'context' => 'Development',
-                'workerCount' => '2', 'maxRequests' => '500'];
+                'workerCount' => (string)max(2, $this->cpuCount()), 'maxRequests' => '10000'];
 
         if ($input->isInteractive()) {
             $io->block(sprintf('Set environment variables (.env) for profile "%s":', $profile), 'INFO', 'fg=green', '');
@@ -133,7 +133,7 @@ class InitCommand extends Command
         }
 
         if ($this->fileShouldBeCreated($caddyFilePath, $io, $force)) {
-            $caddyFileContent = $this->buildCaddyfile($root, $workerMode, $isProd, $prometheus);
+            $caddyFileContent = $this->buildCaddyfile($root, $workerMode, $isProd, $prometheus, $httpPort, $httpsPort, $workerCount, $metricsPort);
             file_put_contents($caddyFilePath, $caddyFileContent);
             $io->success('Created Caddyfile');
         }
@@ -181,6 +181,8 @@ class InitCommand extends Command
                 $io->success('Created ' . $workerFilePath);
             }
         }
+
+        $io->note('Start the server with: frankenphp run -c Caddyfile --envfile .env (Caddy ignores an unknown -e flag).');
 
         return Command::SUCCESS;
     }
@@ -291,9 +293,23 @@ class InitCommand extends Command
         return (int)$helper->ask($input, $output, $question);
     }
 
-    private function buildCaddyfile(string $root, bool $workerMode, bool $isProd, bool $prometheus = false): string
-    {
+    /**
+     * The chosen values become the placeholder defaults. Caddy only reads
+     * .env with --envfile, so the Caddyfile must stand on its own.
+     */
+    private function buildCaddyfile(
+        string $root,
+        bool $workerMode,
+        bool $isProd,
+        bool $prometheus,
+        int $httpPort,
+        int $httpsPort,
+        ?string $workerCount,
+        ?int $metricsPort,
+    ): string {
         $entryScript = $workerMode ? '/worker.php' : '/index.php';
+        $workers = $workerCount ?? ($isProd ? '4' : '2');
+        $metrics = $metricsPort ?? 2019;
 
         // Prometheus / FrankenPHP metrics. When --prometheus is set, the
         // Caddy admin endpoint exposes Prometheus-format metrics covering
@@ -318,7 +334,7 @@ class InitCommand extends Command
         // OpenTelemetry-based observability. Only admin, Go, process,
         // and FrankenPHP families are available via Prometheus scrape.
         $metricsGlobal = $prometheus
-            ? "\n\t# Prometheus metrics — enables /metrics on the Caddy admin\n\t# endpoint at http://localhost:{\$METRICS_PORT:2019}/metrics.\n\t# Server-side scrapers (Prometheus, curl, k6) reach it directly;\n\t# browsers cannot — Caddy admin rejects requests with no Origin\n\t# header (CSRF guard).\n\tadmin localhost:{\$METRICS_PORT:2019}\n\tmetrics\n"
+            ? "\n\t# Prometheus metrics — enables /metrics on the Caddy admin\n\t# endpoint at http://localhost:{\$METRICS_PORT:{$metrics}}/metrics.\n\t# Server-side scrapers (Prometheus, curl, k6) reach it directly;\n\t# browsers cannot — Caddy admin rejects requests with no Origin\n\t# header (CSRF guard).\n\tadmin localhost:{\$METRICS_PORT:{$metrics}}\n\tmetrics\n"
             : '';
 
         // The install-tool routing block is identical across profiles —
@@ -378,7 +394,7 @@ CADDY;
 
         if ($isProd) {
             $workerBlock = $workerMode
-                ? "\n\tfrankenphp {\n\t\tworker {\$FRANKENPHP_WORKER_FILE:{$root}/worker.php} {\$FRANKENPHP_WORKER_COUNT:4}\n\t}\n"
+                ? "\n\tfrankenphp {\n\t\tworker {\$FRANKENPHP_WORKER_FILE:{$root}/worker.php} {\$FRANKENPHP_WORKER_COUNT:{$workers}}\n\t}\n"
                 : '';
 
             // Caddy enables its admin API on localhost:2019 by default; any
@@ -392,8 +408,8 @@ CADDY;
             // hardening headers, no `debug` directive.
             return <<<CADDYFILE
 {
-	http_port {\$HTTP_PORT:80}
-	https_port {\$HTTPS_PORT:443}
+	http_port {\$HTTP_PORT:{$httpPort}}
+	https_port {\$HTTPS_PORT:{$httpsPort}}
 {$adminBlock}{$workerBlock}{$metricsGlobal}
 	# https://caddyserver.com/docs/caddyfile/directives#sorting-algorithm
 	order mercure after encode
@@ -443,14 +459,14 @@ CADDYFILE;
 
         // Development profile (default).
         $workerBlock = $workerMode
-            ? "\n\tfrankenphp {\n\t\tworker {\$FRANKENPHP_WORKER_FILE:{$root}/worker.php} {\$FRANKENPHP_WORKER_COUNT:2}\n\t}\n"
+            ? "\n\tfrankenphp {\n\t\tworker {\$FRANKENPHP_WORKER_FILE:{$root}/worker.php} {\$FRANKENPHP_WORKER_COUNT:{$workers}}\n\t}\n"
             : '';
 
         return <<<CADDYFILE
 {
 	# Use non-standard ports to avoid permission issues
-	http_port {\$HTTP_PORT:8888}
-	https_port {\$HTTPS_PORT:8885}
+	http_port {\$HTTP_PORT:{$httpPort}}
+	https_port {\$HTTPS_PORT:{$httpsPort}}
 	auto_https disable_redirects
 	debug
 {$workerBlock}{$metricsGlobal}
@@ -463,8 +479,8 @@ CADDYFILE;
 
 {\$CADDY_EXTRA_CONFIG}
 
-# HTTP on 8888, HTTPS on 8885
-http://{\$SERVER_NAME:localhost}:{\$HTTP_PORT:8888}, https://{\$SERVER_NAME:localhost}:{\$HTTPS_PORT:8885} {
+# HTTP on {$httpPort}, HTTPS on {$httpsPort}
+http://{\$SERVER_NAME:localhost}:{\$HTTP_PORT:{$httpPort}}, https://{\$SERVER_NAME:localhost}:{\$HTTPS_PORT:{$httpsPort}} {
 	log {
 		# Redact Mercure's authorization and TYPO3's backend CSRF token
 		format filter {
@@ -509,8 +525,9 @@ CADDYFILE;
 
 # FrankenPHP worker configuration.
 # Worker threads block on the database; size them at about two per core.
-# MAX_REQUESTS recycles a worker: a 1-2 s boot amortised over the count,
-# so raise it once memory is stable across a soak test.
+# MAX_REQUESTS recycles a worker: each recycle costs a 1-2 s boot, and a
+# recycle storm (500 at 800 req/s = 16 restarts/s) crashed FrankenPHP 1.12
+# under load. Lower it only if a soak test shows memory growth.
 FRANKENPHP_WORKER_COUNT={$workerCount}
 MAX_REQUESTS={$maxRequests}
 ENV;
