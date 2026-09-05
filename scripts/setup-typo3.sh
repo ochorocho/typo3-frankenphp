@@ -253,6 +253,15 @@ configure_imagemagick() {
 // localhost) without disabling it globally.
 \$GLOBALS['TYPO3_CONF_VARS']['BE']['loginRateLimitIpExcludeList'] = '127.0.0.1, ::1';
 \$GLOBALS['TYPO3_CONF_VARS']['FE']['loginRateLimitIpExcludeList'] = '127.0.0.1, ::1';
+
+// Keep TYPO3's hot caches off SQLite. FileBackend is taggable and reads a
+// cached page in well under a millisecond; on SQLite the same reads cost
+// ~4 ms per request and serialise concurrent workers on file locks
+// (Documentation/Performance.md). Production: Redis or APCu backends.
+foreach (['pages', 'hash', 'rootline', 'pagesection'] as \$cache) {
+    \$GLOBALS['TYPO3_CONF_VARS']['SYS']['caching']['cacheConfigurations'][\$cache]['backend'] = \\TYPO3\\CMS\\Core\\Cache\\Backend\\FileBackend::class;
+    unset(\$GLOBALS['TYPO3_CONF_VARS']['SYS']['caching']['cacheConfigurations'][\$cache]['options']['compression']);
+}
 EOF
 }
 

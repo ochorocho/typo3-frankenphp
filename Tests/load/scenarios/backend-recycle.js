@@ -19,7 +19,10 @@
  * Both are catastrophic in production and need to be caught here, not in
  * the field.
  *
- * Sized to run in under ~2 minutes against `MAX_REQUESTS=500` in .env.
+ * Sized to run in under ~2 minutes against `MAX_REQUESTS=500`. The generated
+ * default is 10000 (recycle storms crashed FrankenPHP under load), so start
+ * the server with `MAX_REQUESTS=500 frankenphp run -c Caddyfile --envfile .env`
+ * for this scenario, or raise ITERATIONS accordingly.
  * If MAX_REQUESTS is set higher in your environment, override
  * `ITERATIONS` via `--env ITERATIONS=N` on the k6 command line.
  *

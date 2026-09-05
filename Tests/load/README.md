@@ -59,7 +59,8 @@ npm run load:spike           # 90 s 0→200→0 — burst recovery
 npm run load:soak            # 10 min sustained — memory-leak detection
 npm run load:backend         # 2 min authenticated nav
 npm run load:backend:soak    # 10 min — WorkerStateResetter regression detector
-npm run load:backend:recycle # ~2 min — MAX_REQUESTS boundary; restart FrankenPHP first
+MAX_REQUESTS=500 frankenphp run -c Caddyfile --envfile .env   # in Build/, the scenario expects 500
+npm run load:backend:recycle # ~2 min — MAX_REQUESTS boundary
 npm run load:backend:multiuser # 3 min — admin + editor interleaved; catches cross-user leaks
 npm run load:install-tool    # 2 min — `?__typo3_install` failsafe path
 npm run load:mixed           # 5 min — 80% frontend + 20% backend
@@ -224,7 +225,7 @@ when finished.
   point; raising the worker count past that has diminishing returns.
 - **Soak scenarios show stable latency then a single slow request** →
   first suspect the MAX_REQUESTS recycle, not GC. With the dev profile
-  (`MAX_REQUESTS=500`, 2 workers) a 10 min soak crosses the boundary
+  (`MAX_REQUESTS=10000`, one worker per core) a 10 min soak crosses the boundary
   every ~1000 requests; the replacement worker's first request pays the
   boot cost (up to ~2 s on the backend, a few hundred ms on the
   frontend). A recycle shows up as one `max` outlier with p95 unchanged
