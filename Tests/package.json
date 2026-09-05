@@ -14,6 +14,7 @@
     "test:codegen": "playwright codegen --load-storage=playwright/.auth/admin.json --ignore-https-errors https://localhost:8885/typo3/main",
     "load:frontend": "k6 run load/scenarios/frontend-load.js",
     "load:frontend:smoke": "k6 run load/scenarios/frontend-smoke.js",
+    "load:frontend:latency": "k6 run load/scenarios/frontend-latency.js",
     "load:stress": "k6 run load/scenarios/frontend-stress.js",
     "load:spike": "k6 run load/scenarios/frontend-spike.js",
     "load:soak": "k6 run load/scenarios/frontend-soak.js",

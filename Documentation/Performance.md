@@ -70,12 +70,30 @@ So on this laptop, "10 ms average" holds up to about 8 concurrent closed-loop cl
 request rate the 10 cores can sustain with headroom. Twenty closed-loop clients need about
 2000 pages per second, which is roughly 2.5 times this machine.
 
+## Round 3: latency at a fixed request rate (`frontend-latency.js`)
+
+The closed loop answers "how many clients share the CPU"; a `constant-arrival-rate` scenario
+answers "what does a page cost at N requests per second". With the admin panel removed from the
+sandbox (0.9 ms per page, dev-only) and 10 threads:
+
+| Rate | k6 avg | median | p95 | dropped iterations |
+| --- | --- | --- | --- | --- |
+| 200 req/s | 5.7 ms | 5.1 ms | 6.1 ms | 0 after the first second |
+| 300 req/s | 4.6 ms | 4.2 ms | 6.1 ms | 0 |
+| 400 req/s | 159 ms | 69 ms | 616 ms | 1262: k6 itself saturates the machine |
+
+That is the 10 ms target with room to spare, up to the point where the load generator on the
+same laptop runs out of CPU. In the same session the closed-loop scenario averaged 24 ms and
+`ab -c 8` 9.8 ms, unchanged physics.
+
 ## What changed
 
 - **Database connections survive requests** (`ConnectionRecycler`, closed after an open
   transaction or 60 s idle).
 - **Sandbox caches on `FileBackend`** (`scripts/setup-typo3.sh`); production equivalents are
-  Redis or APCu.
+  Redis or APCu. The sandbox no longer installs `typo3/cms-adminpanel`: no test used it and its
+  renderer was rebuilt on every request.
+- **`frontend-latency.js`**: the rate-based scenario with the 10 ms average as its threshold.
 - **`frankenphp:init` defaults**: development one worker thread per core, production two per
   core, `MAX_REQUESTS=10000` for both. A recycle every 500 requests at 800 per second is 16 worker
   restarts per second and reproducibly aborted FrankenPHP 1.12.6.

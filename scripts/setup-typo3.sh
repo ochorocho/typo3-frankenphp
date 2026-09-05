@@ -94,7 +94,6 @@ generate_composer_json() {
         "typo3/cms-impexp": "${TYPO3_VERSION}",
         "typo3/cms-beuser": "${TYPO3_VERSION}",
         "typo3/cms-dashboard": "${TYPO3_VERSION}",
-        "typo3/cms-adminpanel": "${TYPO3_VERSION}",
         "typo3/cms-belog": "${TYPO3_VERSION}",
         "typo3/cms-felogin": "${TYPO3_VERSION}",
         "typo3/cms-form": "${TYPO3_VERSION}",

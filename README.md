@@ -99,7 +99,8 @@ client, 4.3 ms of it inside PHP. The extension's own per-request work is 0.2 ms 
 0.5 ms to rebuild discarded services. The machine serves 750 to 850 such pages per second before it is
 CPU-bound, so in a closed-loop load test the average is concurrency divided by that throughput: about
 10 ms at 8 concurrent clients, 25 ms at 20. Kept database connections, file-based caches in the sandbox and
-one worker thread per core are what brought it there. The breakdown, both test matrices and the deployment
+one worker thread per core are what brought it there. Measured at a fixed rate instead of a closed loop
+(`Tests/load/scenarios/frontend-latency.js`, 300 requests per second) a cached page averages 4.6 ms. The breakdown, both test matrices and the deployment
 checklist (real database server, Redis or APCu, cores) are in
 [Documentation/Performance.md](Documentation/Performance.md).
 

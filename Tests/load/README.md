@@ -84,6 +84,7 @@ uses, so one env export covers both).
 | Script                  | Shape  | VUs  | Duration | What it measures                                                 |
 |-------------------------|--------|------|----------|------------------------------------------------------------------|
 | `frontend-smoke.js`     | smoke  | 1    | 30 s     | All Camino routes respond cleanly                                |
+| `frontend-latency.js`   | latency| rate | 1 min    | constant-arrival-rate (RATE req/s, default 200): latency at a fixed rate, the 10 ms average gate |
 | `frontend-load.js`      | load   | 20   | 2 min    | Steady-state anonymous throughput                                |
 | `frontend-stress.js`    | stress | →100 | ~5 min   | Worker-pool saturation inflection point                          |
 | `frontend-spike.js`     | spike  | →200 | 90 s     | Recovery from sudden burst                                       |
@@ -266,3 +267,4 @@ load/
 ```
 
 k6 documentation index: https://grafana.com/docs/k6/latest/
+RATE=300 npm run load:frontend:latency   # ~1 min — response time at a fixed request rate
