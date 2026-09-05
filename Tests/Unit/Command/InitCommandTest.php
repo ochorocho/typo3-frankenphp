@@ -43,6 +43,7 @@ final class InitCommandTest extends TestCase
         self::assertStringContainsString('admin off', $this->generated('Caddyfile'));
         self::assertStringNotContainsString("\tdebug\n", $this->generated('Caddyfile'));
         self::assertStringNotContainsString('E_STRICT', $this->generated('php.ini'));
+        self::assertDoesNotMatchRegularExpression('/^opcache\.jit/m', $this->generated('php.ini'));
     }
 
     #[Test]

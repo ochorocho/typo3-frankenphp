@@ -561,8 +561,8 @@ ENV;
      *
      *   prod (--profile=prod AND TYPO3_CONTEXT not Development) — errors off,
      *        assertions off, opcache.validate_timestamps=0 (flush opcache on
-     *        deploy), bigger opcache sizing, tracing JIT, realpath cache
-     *        tuned, expose_php=Off.
+     *        deploy), bigger opcache sizing, JIT off (PHP default), realpath
+     *        cache tuned, expose_php=Off.
      *
      * Note: max_execution_time is largely a no-op in FrankenPHP worker mode.
      */
@@ -666,11 +666,10 @@ opcache.interned_strings_buffer = 32
 opcache.max_accelerated_files = 20000
 opcache.validate_timestamps = 0
 
-; OPcache JIT — tracing mode (the most aggressive PHP 8.x option) with a
-; 128M buffer. Disable by commenting out both lines if a third-party
-; extension misbehaves.
-opcache.jit = tracing
-opcache.jit_buffer_size = 128M
+; OPcache JIT stays at PHP's default (off). The tracing JIT crashed
+; FrankenPHP workers under load on PHP 8.4/8.5 (php-src #22084, #22443).
+; To try it: opcache.jit = function, opcache.jit_buffer_size = 64M, then
+; load-test before rolling out.
 
 ; Realpath cache — bigger + longer-lived than PHP defaults.
 realpath_cache_size = 4096k
