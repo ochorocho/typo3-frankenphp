@@ -5,24 +5,15 @@ declare(strict_types=1);
 namespace Ochorocho\FrankenPhp\Worker;
 
 /**
- * Curated overrides for the worker-mode service lifecycle.
+ * Curated overrides for WorkerKeepListPass' stateless-by-analysis default.
  *
- * WorkerKeepListPass keeps every shared service that is provably stateless
- * (readonly class / readonly properties only) and discards the rest per
- * request. These lists tune that default:
- *
- *  - PINNED: boot-populated or process-wide services that must survive even
- *    though they have mutable properties. Their dependency closure is pinned
- *    as well. A pinned chain that reaches RequestId, a non-shared service or
- *    an explicit DISCARD is reported as a pin conflict and NOT kept.
- *    Never pin a registry that stores service INSTANCES collected from a
- *    tagged iterator (toolbar items, widgets, link types, MFA providers):
- *    those instances are invisible to the closure check and carry the state
- *    of whichever request built them first.
- *  - SOFT: kept only if their dependency closure stays clean.
- *  - DISCARD: never kept, even if a future refactor makes them readonly.
- *  - RESEED: discarded, then eagerly re-created after the wipe and fed the
- *    post-boot state snapshot (services that ext_localconf.php may mutate).
+ *  - PINNED: boot-populated or process-wide, kept with their closure despite
+ *    mutable properties. Never pin a registry holding instances collected
+ *    from a tagged iterator (toolbar items, widgets, MFA providers): they
+ *    carry the state of the request that built them first.
+ *  - SOFT: kept only while their dependency closure stays clean.
+ *  - DISCARD: never kept, even if a refactor makes them readonly.
+ *  - RESEED: discarded, re-created after the wipe and fed the boot snapshot.
  */
 final class KeepList
 {

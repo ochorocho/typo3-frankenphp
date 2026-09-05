@@ -5,14 +5,9 @@ declare(strict_types=1);
 namespace Ochorocho\FrankenPhp\Worker;
 
 /**
- * Lifecycle overrides declared by packages in Configuration/FrankenPhpWorker.php
- * (and by the project in config/system/frankenphp-worker.php), merged in load
- * order. Every entry remembers its origin (package key or "project") so the
- * audit can attribute the decision.
- *
- * Pure data: the DI container is compiled once and the file must not carry
- * closures. Per-request resets of pinned services belong into a listener for
- * WorkerRequestStartingEvent.
+ * Lifecycle overrides from Configuration/FrankenPhpWorker.php files, each
+ * entry tagged with its origin (package key or "project") for the audit.
+ * Pure data: it is baked into the compiled container.
  */
 final readonly class WorkerConfiguration
 {
@@ -38,23 +33,17 @@ final readonly class WorkerConfiguration
     ) {}
 
     /**
-     * Validates the return value of a configuration file. Fails fast: a typo
-     * in the file must break the container build, not silently keep state.
+     * Validates a file's return value. A typo must break the container build, not keep state.
      */
     public static function fromArray(mixed $data, string $origin, string $file): self
     {
         if (!is_array($data)) {
-            throw new \UnexpectedValueException(sprintf(
-                '%s must return an array, %s returned.',
-                $file,
-                get_debug_type($data)
-            ));
+            throw new \UnexpectedValueException(sprintf('%s must return an array, %s returned.', $file, get_debug_type($data)));
         }
         $unknown = array_diff(array_keys($data), self::KEYS);
         if ($unknown !== []) {
-            throw new \UnexpectedValueException(sprintf(
-                '%s: unknown key(s) "%s", allowed are "%s".',
-                $file,
+            self::reject($file, sprintf(
+                'unknown key(s) "%s", allowed are "%s".',
                 implode('", "', array_map('strval', $unknown)),
                 implode('", "', self::KEYS)
             ));
@@ -63,12 +52,7 @@ final readonly class WorkerConfiguration
         $patterns = self::strings($data, self::KEY_DISCARD_PATTERNS, $origin, $file);
         foreach (array_keys($patterns) as $pattern) {
             if (@preg_match($pattern, '') === false) {
-                throw new \UnexpectedValueException(sprintf(
-                    '%s: "%s" in "%s" is not a valid regular expression.',
-                    $file,
-                    $pattern,
-                    self::KEY_DISCARD_PATTERNS
-                ));
+                self::reject($file, sprintf('"%s" in "%s" is not a valid regular expression.', $pattern, self::KEY_DISCARD_PATTERNS));
             }
         }
 
@@ -119,25 +103,21 @@ final readonly class WorkerConfiguration
     {
         $entries = $data[$key] ?? [];
         if (!is_array($entries)) {
-            throw new \UnexpectedValueException(sprintf(
-                '%s: "%s" must be a list of strings, %s given.',
-                $file,
-                $key,
-                get_debug_type($entries)
-            ));
+            self::reject($file, sprintf('"%s" must be a list of strings, %s given.', $key, get_debug_type($entries)));
         }
         $strings = [];
         foreach ($entries as $entry) {
             if (!is_string($entry) || $entry === '') {
-                throw new \UnexpectedValueException(sprintf(
-                    '%s: "%s" must only contain non-empty strings, %s found.',
-                    $file,
-                    $key,
-                    is_string($entry) ? 'an empty string' : get_debug_type($entry)
-                ));
+                $found = is_string($entry) ? 'an empty string' : get_debug_type($entry);
+                self::reject($file, sprintf('"%s" must only contain non-empty strings, %s found.', $key, $found));
             }
             $strings[$entry] = $origin;
         }
         return $strings;
+    }
+
+    private static function reject(string $file, string $message): never
+    {
+        throw new \UnexpectedValueException($file . ': ' . $message);
     }
 }
