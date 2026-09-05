@@ -78,7 +78,7 @@ class InitCommand extends Command
         // dev ports they can still override interactively or via .env later.
         $defaults = $isProd
             ? ['httpPort' => 80, 'httpsPort' => 443, 'context' => 'Production',
-                'workerCount' => '4', 'maxRequests' => '1000']
+                'workerCount' => (string)max(4, 2 * $this->cpuCount()), 'maxRequests' => '1000']
             : ['httpPort' => 8888, 'httpsPort' => 8885, 'context' => 'Development',
                 'workerCount' => '2', 'maxRequests' => '500'];
 
@@ -183,6 +183,20 @@ class InitCommand extends Command
         }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Worker threads block while waiting on the database, so production
+     * defaults to two per core: measured, requests queue in front of PHP
+     * long before the cores are busy.
+     */
+    private function cpuCount(): int
+    {
+        if (!function_exists('shell_exec')) {
+            return 2;
+        }
+        $count = (int)trim((string)(@shell_exec('nproc 2>/dev/null') ?: @shell_exec('sysctl -n hw.ncpu 2>/dev/null')));
+        return $count > 0 ? $count : 2;
     }
 
     /**
@@ -493,7 +507,10 @@ CADDYFILE;
         if ($workerCount !== null && $maxRequests !== null) {
             $workerEnv = <<<ENV
 
-# FrankenPHP worker configuration
+# FrankenPHP worker configuration.
+# Worker threads block on the database; size them at about two per core.
+# MAX_REQUESTS recycles a worker: a 1-2 s boot amortised over the count,
+# so raise it once memory is stable across a soak test.
 FRANKENPHP_WORKER_COUNT={$workerCount}
 MAX_REQUESTS={$maxRequests}
 ENV;
