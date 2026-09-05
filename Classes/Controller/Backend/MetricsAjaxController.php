@@ -7,11 +7,18 @@ namespace Ochorocho\FrankenPhp\Controller\Backend;
 use Ochorocho\FrankenPhp\Service\PrometheusTextParser;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
 use TYPO3\CMS\Core\Http\JsonResponse;
 use TYPO3\CMS\Core\Http\RequestFactory;
 
+/**
+ * Proxies Caddy's admin /metrics endpoint for the dashboard widget. Caddy
+ * admin rejects browser requests (Origin header), so PHP scrapes it.
+ */
 final class MetricsAjaxController
 {
+    public const string WIDGET_IDENTIFIER = 'frankenphp-prometheus-metrics';
+
     public function __construct(
         private readonly RequestFactory $requestFactory,
         private readonly PrometheusTextParser $parser,
@@ -19,10 +26,14 @@ final class MetricsAjaxController
 
     public function indexAction(ServerRequestInterface $request): ResponseInterface
     {
-        $port = $this->resolveMetricsPort();
-        // The IP can be hardcoded here, as we assume we're running FrankenPHP locally.
-        // So only the port is subject to change
-        $url = sprintf('http://127.0.0.1:%d/metrics', $port);
+        // Same gate the dashboard applies before showing the widget.
+        $user = $GLOBALS['BE_USER'] ?? null;
+        if (!$user instanceof BackendUserAuthentication || !$user->check('available_widgets', self::WIDGET_IDENTIFIER)) {
+            return new JsonResponse(['error' => 'forbidden'], 403);
+        }
+
+        // FrankenPHP runs locally, only the port varies.
+        $url = sprintf('http://127.0.0.1:%d/metrics', $this->resolveMetricsPort());
 
         try {
             $response = $this->requestFactory->request($url, 'GET', [
@@ -31,31 +42,18 @@ final class MetricsAjaxController
                 'http_errors'     => false,
             ]);
         } catch (\Throwable $e) {
-            return new JsonResponse(
-                [
-                    'error'   => 'metrics endpoint unreachable',
-                    'url'     => $url,
-                    'detail'  => $e->getMessage(),
-                    'hint'    => 'Run `vendor/bin/typo3 frankenphp:init --prometheus` and restart frankenphp.',
-                ],
-                503,
-            );
+            return new JsonResponse([
+                'error'  => 'metrics endpoint unreachable',
+                'detail' => $e->getMessage(),
+                'hint'   => 'Run `vendor/bin/typo3 frankenphp:init --prometheus` and restart frankenphp.',
+            ], 503);
         }
 
         if ($response->getStatusCode() !== 200) {
-            return new JsonResponse(
-                [
-                    'error' => sprintf('metrics endpoint returned HTTP %d', $response->getStatusCode()),
-                    'url'   => $url,
-                ],
-                502,
-            );
+            return new JsonResponse(['error' => sprintf('metrics endpoint returned HTTP %d', $response->getStatusCode())], 502);
         }
 
-        return new JsonResponse([
-            'url'     => $url,
-            'metrics' => $this->parser->parse((string)$response->getBody()),
-        ]);
+        return new JsonResponse(['metrics' => $this->parser->parse((string)$response->getBody())]);
     }
 
     private function resolveMetricsPort(): int
