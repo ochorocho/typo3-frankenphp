@@ -51,9 +51,13 @@ closure instead.
    response carries its own CSP nonce. `LogManager` is pointed at it.
 3. Every container instance outside the keep set is discarded.
 4. Pinned services with per-request state are reset: all `Context` aspects
-   removed, Doctrine connections closed, `cache.runtime` flushed, boot state
-   replayed into `AssetCollector` / `MetaTagManagerRegistry` /
-   `MenuContentObjectFactory`.
+   removed, `cache.runtime` flushed, boot state replayed into
+   `AssetCollector` / `MetaTagManagerRegistry` / `MenuContentObjectFactory`.
+   Database connections are kept (`ConnectionRecycler`, before step 1):
+   reconnecting per request was the dominant cost under load. A connection is
+   closed only when the previous request died inside a transaction or after
+   `KeepList::CONNECTION_MAX_IDLE_SECONDS` of idle time. See
+   `Performance.md` for the numbers.
 5. `PageRenderer` is re-created and fed the post-boot state (assets added by
    `ext_localconf.php` survive).
 6. `WorkerRequestStartingEvent` is dispatched for third-party resets.

@@ -14,7 +14,6 @@ use TYPO3\CMS\Core\Cache\Backend\TransientMemoryBackend;
 use TYPO3\CMS\Core\Cache\Frontend\FrontendInterface;
 use TYPO3\CMS\Core\Context\Context;
 use TYPO3\CMS\Core\Core\RequestId;
-use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\DataHandling\DataHandler;
 use TYPO3\CMS\Core\Log\LogManager;
 use TYPO3\CMS\Core\MetaTag\MetaTagManagerRegistry;
@@ -40,6 +39,10 @@ use TYPO3\CMS\Frontend\Resource\PublicUrlPrefixer as FrontendPublicUrlPrefixer;
  */
 final readonly class WorkerStateResetter
 {
+    public function __construct(
+        private ConnectionRecycler $connectionRecycler = new ConnectionRecycler(),
+    ) {}
+
     public function capture(ContainerInterface $container): WorkerStateSnapshot
     {
         // ext_localconf.php may register menu types, assets and meta tag
@@ -68,6 +71,10 @@ final readonly class WorkerStateResetter
      */
     public function reset(WorkerStateSnapshot $snapshot, ContainerInterface $container): int
     {
+        // EXEC_TIME still holds the previous request's start until resetGlobals().
+        $idleSeconds = time() - (int)($GLOBALS['EXEC_TIME'] ?? time());
+        $this->connectionRecycler->recycle($idleSeconds);
+
         $this->resetProcessState();
         $this->resetGlobals();
         GeneralUtility::flushInternalRuntimeCaches();
@@ -170,10 +177,6 @@ final readonly class WorkerStateResetter
         foreach ($aspectNames as $name) {
             $context->unsetAspect($name);
         }
-
-        // Doctrine connections are cached statically; drop them so the next
-        // request reconnects instead of hitting "MySQL server has gone away".
-        $container->get(ConnectionPool::class)->resetConnections();
 
         // cache.runtime's backend is documented as "stores cache entries during
         // one script run". Core caches user- and page-bound data in it under

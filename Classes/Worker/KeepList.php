@@ -136,6 +136,12 @@ final class KeepList
         '/^generic_[0-9a-f]+-tableinfo-cache_/',
     ];
 
+    /**
+     * Database connections survive requests (see ConnectionRecycler) and are
+     * closed after this many idle seconds, well below any server wait_timeout.
+     */
+    public const int CONNECTION_MAX_IDLE_SECONDS = 60;
+
     /** @var list<string> */
     public const array RESEED = [
         \TYPO3\CMS\Core\Page\PageRenderer::class,
