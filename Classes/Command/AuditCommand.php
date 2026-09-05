@@ -77,6 +77,7 @@ final class AuditCommand extends Command
         }
 
         $this->printSummary($io, $report);
+        $this->printUnmatched($io);
         $this->printDemotionCauses($io, $report);
         if ((bool)$input->getOption('summary')) {
             return Command::SUCCESS;
@@ -120,6 +121,28 @@ final class AuditCommand extends Command
         $rows[] = ['total shared services', (string)count($report)];
         $io->section('Summary');
         $io->table(['group', 'count'], $rows);
+    }
+
+    private function printUnmatched(SymfonyStyle $io): void
+    {
+        if (!$this->container instanceof Container || !$this->container->hasParameter(WorkerKeepListPass::PARAMETER_UNMATCHED)) {
+            return;
+        }
+        /** @var list<array{list: string, name: string, origin: string}> $unmatched */
+        $unmatched = $this->container->getParameter(WorkerKeepListPass::PARAMETER_UNMATCHED);
+        if ($unmatched === []) {
+            return;
+        }
+        $io->warning(sprintf(
+            '%d FrankenPhpWorker.php entr%s matched no shared service (typo, or the package is not installed):',
+            count($unmatched),
+            count($unmatched) === 1 ? 'y' : 'ies'
+        ));
+        $rows = [];
+        foreach ($unmatched as $entry) {
+            $rows[] = [$entry['origin'], $entry['list'], $entry['name']];
+        }
+        $io->table(['origin', 'list', 'name'], $rows);
     }
 
     /**

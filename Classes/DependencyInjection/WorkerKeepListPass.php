@@ -42,6 +42,7 @@ final class WorkerKeepListPass implements CompilerPassInterface
 {
     public const string PARAMETER_KEEP = 'frankenphp.worker.keep';
     public const string PARAMETER_REPORT = 'frankenphp.worker.report';
+    public const string PARAMETER_UNMATCHED = 'frankenphp.worker.unmatched';
     public const string TAG_KEEP = 'frankenphp.keep';
     public const string TAG_DISCARD = 'frankenphp.discard';
     public const string REQUEST_ID_SERVICE = '_early.' . RequestId::class;
@@ -74,6 +75,32 @@ final class WorkerKeepListPass implements CompilerPassInterface
     private array $pinned = [];
 
     /**
+     * Services registered under an id other than their class name.
+     *
+     * @var array<string, list<string>> class => service ids
+     */
+    private array $classIndex = [];
+
+    /**
+     * The dependency closure of the curated PINNED roots. Boot-populated
+     * infrastructure: discarding any of it breaks the next request, so tag,
+     * pattern and config discards are recorded here instead of applied.
+     *
+     * @var array<string, true>
+     */
+    private array $protected = [];
+
+    /** @var array<string, string> protected id => the discard reason that was ignored */
+    private array $ignoredDiscards = [];
+
+    /**
+     * Config entries that matched no shared service (typos, optional packages).
+     *
+     * @var list<array{list: string, name: string, origin: string}>
+     */
+    private array $unmatched = [];
+
+    /**
      * Reason prefixes of explicit discard decisions, as opposed to the
      * intrinsic analysis. Only these block a keep request or a pin chain.
      *
@@ -102,9 +129,14 @@ final class WorkerKeepListPass implements CompilerPassInterface
     {
         $this->report = [];
         $this->pinned = [];
+        $this->classIndex = [];
+        $this->protected = [];
+        $this->ignoredDiscards = [];
+        $this->unmatched = [];
         $graph = $container->getCompiler()->getServiceReferenceGraph();
 
         $this->classifyIntrinsically($container);
+        $this->protectCuratedPins($container, $graph);
         $this->applyCuratedOverrides($container, $graph);
         $this->demoteUntilClosed($container, $graph);
 
@@ -115,6 +147,7 @@ final class WorkerKeepListPass implements CompilerPassInterface
         ));
         $container->setParameter(self::PARAMETER_KEEP, array_values($keep));
         $container->setParameter(self::PARAMETER_REPORT, $this->report);
+        $container->setParameter(self::PARAMETER_UNMATCHED, $this->unmatched);
     }
 
     private function classifyIntrinsically(ContainerBuilder $container): void
@@ -148,20 +181,41 @@ final class WorkerKeepListPass implements CompilerPassInterface
             ];
             if ($class !== null && $class !== $id) {
                 $this->report[$id]['class'] = $class;
+                $this->classIndex[$class][] = $id;
             }
+        }
+    }
+
+    private function protectCuratedPins(ContainerBuilder $container, ServiceReferenceGraph $graph): void
+    {
+        $stack = [];
+        foreach ($this->pinnedServices as $name) {
+            array_push($stack, ...$this->resolveNames($container, $name));
+        }
+        while ($stack !== []) {
+            $id = array_pop($stack);
+            if (isset($this->protected[$id]) || !isset($this->report[$id])) {
+                continue;
+            }
+            $this->protected[$id] = true;
+            array_push($stack, ...$this->dependencies($container, $graph, $id));
         }
     }
 
     private function applyCuratedOverrides(ContainerBuilder $container, ServiceReferenceGraph $graph): void
     {
         foreach ($this->discardServices as $name) {
-            $this->override($container, $name, self::CATEGORY_DISCARD, 'curated');
+            foreach ($this->resolveNames($container, $name) as $id) {
+                $this->override($id, self::CATEGORY_DISCARD, 'curated');
+            }
         }
         foreach ($container->findTaggedServiceIds(self::TAG_DISCARD) as $id => $_) {
-            $this->override($container, $id, self::CATEGORY_DISCARD, 'tag');
+            $this->override($this->resolveId($container, $id), self::CATEGORY_DISCARD, 'tag');
         }
         foreach ($this->configuration->discard as $name => $origin) {
-            $this->override($container, $name, self::CATEGORY_DISCARD, 'config:' . $origin);
+            foreach ($this->resolveConfigured($container, WorkerConfiguration::KEY_DISCARD, $name, $origin) as $id) {
+                $this->override($id, self::CATEGORY_DISCARD, 'config:' . $origin);
+            }
         }
 
         $patterns = array_fill_keys($this->discardPatterns, 'pattern');
@@ -169,50 +223,98 @@ final class WorkerKeepListPass implements CompilerPassInterface
             $patterns[$pattern] = 'pattern:config:' . $origin;
         }
         foreach ($this->report as $id => $entry) {
+            if ($this->isExplicitlyDiscarded($id)) {
+                continue;
+            }
             foreach ($patterns as $pattern => $reason) {
                 $class = $entry['class'] ?? $id;
                 if (preg_match($pattern, $id) === 1 || preg_match($pattern, $class) === 1) {
-                    $this->report[$id]['category'] = self::CATEGORY_DISCARD;
-                    $this->report[$id]['reason'] = $reason;
+                    $this->override($id, self::CATEGORY_DISCARD, $reason);
                     break;
                 }
             }
         }
 
         foreach ($this->softServices as $name) {
-            $this->override($container, $name, self::CATEGORY_KEEP, 'soft');
+            foreach ($this->resolveNames($container, $name) as $id) {
+                $this->override($id, self::CATEGORY_KEEP, 'soft');
+            }
         }
         $tagPinned = [];
         foreach ($container->findTaggedServiceIds(self::TAG_KEEP) as $id => $tags) {
             if (($tags[0]['mode'] ?? 'soft') === 'pinned') {
-                $tagPinned[] = $id;
+                $tagPinned[] = $this->resolveId($container, $id);
             } else {
-                $this->override($container, $id, self::CATEGORY_KEEP, 'tag');
+                $this->override($this->resolveId($container, $id), self::CATEGORY_KEEP, 'tag');
             }
         }
         foreach ($this->configuration->keep as $name => $origin) {
-            $this->override($container, $name, self::CATEGORY_KEEP, 'config:' . $origin);
+            foreach ($this->resolveConfigured($container, WorkerConfiguration::KEY_KEEP, $name, $origin) as $id) {
+                $this->override($id, self::CATEGORY_KEEP, 'config:' . $origin);
+            }
         }
 
-        foreach ([...$this->pinnedServices, ...$tagPinned] as $name) {
-            $this->pin($container, $graph, $this->resolveId($container, $name), 'pinned');
+        foreach ($this->pinnedServices as $name) {
+            foreach ($this->resolveNames($container, $name) as $id) {
+                $this->pin($container, $graph, $id, 'pinned');
+            }
+        }
+        foreach ($tagPinned as $id) {
+            $this->pin($container, $graph, $id, 'pinned');
         }
         foreach ($this->configuration->pinned as $name => $origin) {
-            $this->pin($container, $graph, $this->resolveId($container, $name), 'pinned:config:' . $origin);
+            foreach ($this->resolveConfigured($container, WorkerConfiguration::KEY_PIN, $name, $origin) as $id) {
+                $this->pin($container, $graph, $id, 'pinned:config:' . $origin);
+            }
         }
     }
 
-    private function override(ContainerBuilder $container, string $name, string $category, string $reason): void
+    private function override(string $id, string $category, string $reason): void
     {
-        $id = $this->resolveId($container, $name);
         if (!isset($this->report[$id])) {
             return;
         }
         if ($category === self::CATEGORY_KEEP && $this->isExplicitlyDiscarded($id)) {
             return;
         }
+        if ($category === self::CATEGORY_DISCARD && $reason !== 'curated' && isset($this->protected[$id])) {
+            $this->ignoredDiscards[$id] = $reason;
+            return;
+        }
         $this->report[$id]['category'] = $category;
         $this->report[$id]['reason'] = $reason;
+    }
+
+    /**
+     * Report ids a curated or configured name refers to: the id itself
+     * (alias-resolved) plus every service registered under another id
+     * whose class is that name.
+     *
+     * @return list<string>
+     */
+    private function resolveNames(ContainerBuilder $container, string $name): array
+    {
+        $ids = [];
+        $id = $this->resolveId($container, $name);
+        if (isset($this->report[$id])) {
+            $ids[$id] = true;
+        }
+        foreach ($this->classIndex[ltrim($name, '\\')] ?? [] as $classId) {
+            $ids[$classId] = true;
+        }
+        return array_keys($ids);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function resolveConfigured(ContainerBuilder $container, string $list, string $name, string $origin): array
+    {
+        $ids = $this->resolveNames($container, $name);
+        if ($ids === []) {
+            $this->unmatched[] = ['list' => $list, 'name' => $name, 'origin' => $origin];
+        }
+        return $ids;
     }
 
     private function isExplicitlyDiscarded(string $id): bool
@@ -261,7 +363,11 @@ final class WorkerKeepListPass implements CompilerPassInterface
             }
             $this->pinned[$id] = true;
             $this->report[$id]['category'] = self::CATEGORY_KEEP;
-            $this->report[$id]['reason'] = $id === $root ? $rootReason : 'pinned-via:' . $root;
+            $reason = $id === $root ? $rootReason : 'pinned-via:' . $root;
+            if (isset($this->ignoredDiscards[$id])) {
+                $reason .= ':ignored-discard:' . $this->ignoredDiscards[$id];
+            }
+            $this->report[$id]['reason'] = $reason;
             // Instances collected through iterators / locators are invisible
             // to the closure check; flag them so the audit reader looks twice.
             if ($this->holdsLazyCollection($container->getDefinition($id))) {

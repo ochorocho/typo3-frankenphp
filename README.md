@@ -142,10 +142,15 @@ return [
 ```
 
 Precedence is one rule: an explicit discard from any source (curated list, tag, pattern, file) wins over a keep or
-pin from any other source. `keep` is soft and can still be demoted by its dependencies; a `pin` whose closure reaches
-a per-request service is reported as a pin conflict and not kept. The audit shows the origin of every override as
-`config:<extension key>`, `pinned:config:<extension key>` or `pattern:config:<extension key>`. Unknown keys,
-non-string entries or invalid patterns fail the container build with the file name in the message.
+pin from any other source. The only exception is the curated boot-populated infrastructure (`TcaSchemaFactory`,
+`IconRegistry`, `cache.runtime`, …) and its dependencies: a file cannot discard those, the audit shows the ignored
+request as `pinned:ignored-discard:…`. `keep` is soft and can still be demoted by its dependencies; a `pin` whose
+closure reaches a per-request service is reported as a pin conflict and not kept. Keeping a Core service you do not
+own can leak one user's state to the next: verify with two backend users, `discard` is always the safe direction.
+The audit shows the origin of every override as `config:<extension key>`, `pinned:config:<extension key>` or
+`pattern:config:<extension key>`, and warns about entries that matched no service. A class name also reaches a
+service registered under a custom id. Unknown keys, non-string entries or invalid patterns fail the container build
+with the file name in the message.
 
 **4. Verify**
 

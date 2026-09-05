@@ -113,14 +113,22 @@ return [
 ];
 ```
 
-Entries are service ids or class names (aliases are resolved, unknown names
-are ignored so a file may reference optional packages). Precedence is
-simple: **an explicit discard from any source wins** — curated list, tag,
-pattern or file — over a `keep` or `pin` from any other source. `keep` is
-soft and can still be demoted by the dependency closure; a `pin` whose
-closure reaches an explicit discard, a non-shared service or `RequestId`
-is reported as a pin conflict and not kept. Files are applied in package
-dependency order, the project file last, and `frankenphp:audit` names the
+Entries are service ids or class names. Aliases are resolved, and a class
+name also reaches services registered under a custom id with that class.
+Names that match no shared service (a typo, or a package that is not
+installed) are listed by `frankenphp:audit` as a warning.
+
+Precedence is two rules. **An explicit discard from any source wins** —
+curated list, tag, pattern or file — over a `keep` or `pin` from any other
+source. **Except the curated `KeepList::PINNED` infrastructure and its
+dependency closure** (`TcaSchemaFactory`, `IconRegistry`, `cache.runtime`,
+`Context`, …): those are filled once at boot, discarding them breaks the next
+request, so a file or pattern cannot discard them. The request is recorded
+instead and the audit shows it as `pinned:ignored-discard:config:my_ext`.
+`keep` is soft and can still be demoted by the dependency closure; a `pin`
+whose closure reaches an explicit discard, a non-shared service or
+`RequestId` is reported as a pin conflict and not kept. Files are applied in
+package dependency order, the project file last, and the audit names the
 origin: `config:my_ext`, `pinned:config:my_ext`, `pattern:config:project`.
 
 **3. Reset a pinned service per request** — the files carry no closures.

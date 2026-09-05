@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection;
 
 use Ochorocho\FrankenPhp\DependencyInjection\WorkerKeepListPass;
+use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\ConfigPinRoot;
+use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\CustomIdService;
 use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\DependsOnPinConflictRoot;
 use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\HolderOfInlinedMutable;
 use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\HolderOfIterator;
@@ -37,6 +39,9 @@ final class WorkerKeepListPassTest extends TestCase
 
     /** @var list<string> */
     private array $keep;
+
+    /** @var list<array{list: string, name: string, origin: string}> */
+    private array $unmatched;
 
     protected function setUp(): void
     {
@@ -72,22 +77,26 @@ final class WorkerKeepListPassTest extends TestCase
         $this->register($builder, 'config.keep', [], MutableService::class);
         $this->register($builder, 'config.keep.denied', [], MutableService::class)->addTag(WorkerKeepListPass::TAG_DISCARD);
         $this->register($builder, 'config.pin.dependency', [], StatelessReadonly::class);
-        $this->register($builder, 'config.pin.root', [new Reference('config.pin.dependency')], PinnedRoot::class);
+        $this->register($builder, 'config.pin.root', [new Reference('config.pin.dependency')], ConfigPinRoot::class);
         $this->register($builder, 'config.pin.denied', [], StatelessReadonly::class)->addTag(WorkerKeepListPass::TAG_DISCARD);
         $this->register($builder, 'vendor.ext.legacy.thing', [], StatelessReadonly::class);
+        $this->register($builder, 'custom.id', [], CustomIdService::class);
+        // A curated pin chain that configuration tries, and fails, to discard.
+        $this->register($builder, 'curated.dependency', [], StatelessReadonly::class);
+        $this->register($builder, 'curated.root', [new Reference('curated.dependency')], ConfigPinRoot::class);
 
         $builder->addCompilerPass(
             new WorkerKeepListPass(
-                pinnedServices: [PinnedRoot::class, PinConflictRoot::class, 'pinned.collector'],
+                pinnedServices: [PinnedRoot::class, PinConflictRoot::class, 'pinned.collector', 'curated.root'],
                 softServices: [],
                 discardServices: [],
                 discardPatterns: [],
                 keepIdPatterns: ['/^cache\./' => 'cache-frontend'],
                 configuration: new WorkerConfiguration(
                     pinned: ['config.pin.root' => 'ext_a', 'config.pin.denied' => 'ext_a', 'pinned.missing' => 'ext_a'],
-                    keep: ['config.keep' => 'ext_a', 'config.keep.denied' => 'ext_a'],
-                    discard: ['config.discard' => 'ext_a', 'does.not.exist' => 'ext_a'],
-                    discardPatterns: ['/^vendor\.ext\./' => 'ext_b'],
+                    keep: ['config.keep' => 'ext_a', 'config.keep.denied' => 'ext_a', CustomIdService::class => 'ext_a'],
+                    discard: ['config.discard' => 'ext_a', 'does.not.exist' => 'ext_a', 'curated.root' => 'ext_a'],
+                    discardPatterns: ['/^vendor\.ext\./' => 'ext_b', '/^curated\.dependency$/' => 'ext_b'],
                 ),
             ),
             PassConfig::TYPE_AFTER_REMOVING,
@@ -101,6 +110,9 @@ final class WorkerKeepListPassTest extends TestCase
         /** @var list<string> $keep */
         $keep = $builder->getParameter(WorkerKeepListPass::PARAMETER_KEEP);
         $this->keep = $keep;
+        /** @var list<array{list: string, name: string, origin: string}> $unmatched */
+        $unmatched = $builder->getParameter(WorkerKeepListPass::PARAMETER_UNMATCHED);
+        $this->unmatched = $unmatched;
     }
 
     /**
@@ -270,9 +282,37 @@ final class WorkerKeepListPassTest extends TestCase
     }
 
     #[Test]
-    public function configurationPinOfMissingServiceIsIgnored(): void
+    public function configurationEntriesWithoutServiceAreReportedAsUnmatched(): void
     {
         self::assertArrayNotHasKey('pinned.missing', $this->report);
+        self::assertSame([
+            ['list' => 'discard', 'name' => 'does.not.exist', 'origin' => 'ext_a'],
+            ['list' => 'pin', 'name' => 'pinned.missing', 'origin' => 'ext_a'],
+        ], $this->unmatched);
+    }
+
+    #[Test]
+    public function classNameReachesServicesRegisteredUnderCustomIds(): void
+    {
+        self::assertContains('custom.id', $this->keep);
+        self::assertSame('config:ext_a', $this->report['custom.id']['reason']);
+    }
+
+    #[Test]
+    public function curatedPinnedRootCannotBeDiscardedByConfiguration(): void
+    {
+        self::assertContains('curated.root', $this->keep);
+        self::assertSame('pinned:ignored-discard:config:ext_a', $this->report['curated.root']['reason']);
+    }
+
+    #[Test]
+    public function curatedPinnedClosureCannotBeDiscardedByConfigurationPattern(): void
+    {
+        self::assertContains('curated.dependency', $this->keep);
+        self::assertSame(
+            'pinned-via:curated.root:ignored-discard:pattern:config:ext_b',
+            $this->report['curated.dependency']['reason']
+        );
     }
 
     #[Test]
