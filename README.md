@@ -44,10 +44,12 @@ per-request PHP execution.
 composer require ochorocho/frankenphp
 ```
 
-Then run FrankenPHP from the project root using the created config files (`Caddyfile`, `.env`):
+Then run FrankenPHP from the project root using the created config files (`Caddyfile`, `.env`). The flag is
+`--envfile`: Caddy silently ignores an unknown `-e`, and without the env file only the Caddyfile's built-in defaults
+apply (PHP still sees `.env` when `helhum/dotenv-connector` is installed, which hides the mistake):
 
 ```
-frankenphp run -c Caddyfile -e .env
+frankenphp run -c Caddyfile --envfile .env
 ```
 
 The generated profile follows `TYPO3_CONTEXT`: with `TYPO3_CONTEXT=Production` set during `composer install`, the
@@ -92,12 +94,13 @@ leak) and `X-FrankenPHP-Reset-Us` (microseconds the reset took). Details, includ
 
 ### What a request costs
 
-Measured on the sandbox (SQLite, 10 cores): a cached frontend page takes 7 ms end to end with one
-client and 11 to 13 ms at 100 concurrent users on 8 worker threads. The extension's own per-request
-work is 0.2 ms for the reset plus about 1 ms to rebuild the discarded services; the rest is TYPO3
-reading its caches from SQLite. Database connections now survive requests, which halved the
-latency under load. The full breakdown, the 100-user matrix and the deployment checklist for a
-10 ms target (MariaDB, Redis or APCu caches, thread sizing) are in
+Measured on the sandbox (SQLite, 10 cores): a cached frontend page takes 7 to 9 ms end to end with one
+client, 4.3 ms of it inside PHP. The extension's own per-request work is 0.2 ms for the reset plus about
+0.5 ms to rebuild discarded services. The machine serves 750 to 850 such pages per second before it is
+CPU-bound, so in a closed-loop load test the average is concurrency divided by that throughput: about
+10 ms at 8 concurrent clients, 25 ms at 20. Kept database connections, file-based caches in the sandbox and
+one worker thread per core are what brought it there. The breakdown, both test matrices and the deployment
+checklist (real database server, Redis or APCu, cores) are in
 [Documentation/Performance.md](Documentation/Performance.md).
 
 ### Adapting an extension for worker mode
@@ -283,7 +286,7 @@ TYPO3_SETUP_ADMIN_USERNAME=foo TYPO3_SETUP_ADMIN_PASSWORD='S3cret!' scripts/setu
 ### Run the dev server
 
 ```bash
-cd Build && frankenphp run
+cd Build && frankenphp run -c Caddyfile --envfile .env
 ```
 
 - Frontend: http://localhost:8888 / https://localhost:8885
