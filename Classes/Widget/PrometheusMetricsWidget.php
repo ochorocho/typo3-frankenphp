@@ -90,8 +90,8 @@ final readonly class PrometheusMetricsWidget implements
 
     public function __construct(
         private WidgetConfigurationInterface $configuration,
-        private BackendViewFactory           $backendViewFactory,
-        private UriBuilder                   $uriBuilder,
+        private BackendViewFactory $backendViewFactory,
+        private UriBuilder $uriBuilder,
     ) {}
 
     public function getSettingsDefinitions(): array
