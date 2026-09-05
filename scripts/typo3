@@ -18,5 +18,7 @@ if [ ! -x "${TYPO3}" ]; then
     exit 1
 fi
 
+# Match the context the sandbox server runs with (Build/.env).
+export TYPO3_CONTEXT="${TYPO3_CONTEXT:-Development}"
 cd "${ROOT}/Build"
 exec vendor/bin/typo3 "$@"

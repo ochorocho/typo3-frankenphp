@@ -13,6 +13,9 @@ TYPO3_VERSION_MARKER="${BUILD_DIR}/var/typo3-version"
 TYPO3_VERSION="${TYPO3_VERSION:-^14.3}"
 
 # Variable names mirror those documented by `vendor/bin/typo3 setup --help`
+# frankenphp:init derives its profile from the context; an unset context
+# counts as Production in TYPO3, which would give the sandbox ports 80/443.
+export TYPO3_CONTEXT="${TYPO3_CONTEXT:-Development}"
 export TYPO3_SETUP_ADMIN_USERNAME="${TYPO3_SETUP_ADMIN_USERNAME:-admin}"
 export TYPO3_SETUP_ADMIN_PASSWORD="${TYPO3_SETUP_ADMIN_PASSWORD:-Password.1}"
 export TYPO3_SETUP_ADMIN_EMAIL="${TYPO3_SETUP_ADMIN_EMAIL:-typo3@example.com}"

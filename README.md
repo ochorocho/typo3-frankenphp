@@ -50,6 +50,11 @@ Then run FrankenPHP from the project root using the created config files (`Caddy
 frankenphp run -c Caddyfile -e .env
 ```
 
+The generated profile follows `TYPO3_CONTEXT`: with `TYPO3_CONTEXT=Production` set during `composer install`, the
+Composer auto-run writes the production profile (ports 80/443, errors logged not displayed, Caddy admin API off). Any
+other context yields the development profile. Pass `--profile` to override, and note that `--force` backs up an
+existing `.env` to `.env.bak-<timestamp>` before overwriting it.
+
 ## Diagnostics
 
 The TYPO3 backend's **System Information** dropdown (the info icon in the topbar) shows a **Worker Mode** row —
@@ -255,6 +260,9 @@ The script is **idempotent**. On a re-run with the same `TYPO3_VERSION` it skips
 different version it resets `Build/vendor/`, `composer.lock`, `config/system/`, and `var/cache` before re-installing —
 so switching TYPO3 majors is one command. It writes a `Build/composer.json` that requires the extension as a symlinked
 path repository (`"url": "../"`), so editing root files affects the sandbox immediately with no extra step.
+
+The sandbox and the Docker setup use fixed, well-known credentials (backend admin, e2e editor, MariaDB root) and run
+with `display_errors` on. Keep them on localhost; never expose the sandbox ports to a network.
 
 Admin login (created by `typo3 setup`): `admin` / `Password.1`. Override via:
 

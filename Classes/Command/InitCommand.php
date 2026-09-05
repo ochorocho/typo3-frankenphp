@@ -36,8 +36,8 @@ class InitCommand extends Command
             'profile',
             null,
             InputOption::VALUE_REQUIRED,
-            'Configuration profile: dev (default) or prod. Drives Caddyfile / .env / php.ini / worker.php defaults.',
-            self::PROFILE_DEV
+            'Configuration profile: dev or prod. Drives Caddyfile / .env / php.ini / worker.php defaults. '
+            . 'Default: prod when TYPO3_CONTEXT is Production, dev otherwise.'
         );
         $this->addOption(
             'prometheus',
@@ -55,9 +55,8 @@ class InitCommand extends Command
     {
         $io = new SymfonyStyle($input, $output);
 
-        $profile = (string)$input->getOption('profile');
-        if (!in_array($profile, [self::PROFILE_DEV, self::PROFILE_PROD], true)) {
-            $io->error(sprintf('Invalid --profile "%s": must be "dev" or "prod".', $profile));
+        $profile = $this->resolveProfile($input, $io);
+        if ($profile === null) {
             return Command::FAILURE;
         }
         $isProd = $profile === self::PROFILE_PROD;
@@ -140,6 +139,13 @@ class InitCommand extends Command
         }
 
         if ($this->fileShouldBeCreated($envFilePath, $io, $force)) {
+            // .env is the one generated file users extend by hand (dotenv
+            // connector credentials); never let --force destroy that silently.
+            if (file_exists($envFilePath)) {
+                $backup = $envFilePath . '.bak-' . date('Ymd-His');
+                copy($envFilePath, $backup);
+                $io->note(sprintf('Existing .env backed up to %s', $backup));
+            }
             $envContent = $this->buildEnvFile(
                 $phpIniScanDir,
                 $typo3Context,
@@ -177,6 +183,26 @@ class InitCommand extends Command
         }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Explicit --profile wins. Without it the TYPO3 context decides, so a
+     * Composer auto-run on a production host never writes dev defaults.
+     */
+    private function resolveProfile(InputInterface $input, SymfonyStyle $io): ?string
+    {
+        $option = $input->getOption('profile');
+        if ($option !== null) {
+            $profile = (string)$option;
+            if (!in_array($profile, [self::PROFILE_DEV, self::PROFILE_PROD], true)) {
+                $io->error(sprintf('Invalid --profile "%s": must be "dev" or "prod".', $profile));
+                return null;
+            }
+            return $profile;
+        }
+        $profile = Environment::getContext()->isProduction() ? self::PROFILE_PROD : self::PROFILE_DEV;
+        $io->note(sprintf('Using profile "%s" (TYPO3_CONTEXT=%s). Pass --profile to override.', $profile, Environment::getContext()));
+        return $profile;
     }
 
     /**
@@ -285,6 +311,18 @@ class InitCommand extends Command
         // factor it out so a Caddyfile feature added to one profile can't
         // silently miss the other.
         $installToolBlock = <<<CADDY
+	# Access rules TYPO3 ships in its .htaccess, which Caddy has no equivalent
+	# for: hidden files (except /.well-known/), recycler and temp folders,
+	# TypoScript templates, source and config file types, and PHP files inside
+	# upload directories (defense in depth behind TYPO3's fileDenyPattern).
+	@denied {
+		not path /.well-known/*
+		path_regexp (?i)(?:^|/)\\.|/_(?:recycler|temp)_/|^/fileadmin/templates/.*\\.(?:txt|ts)$|^/(?:vendor|typo3_src|typo3temp/var)(?:/|$)|\\.(?:bak|co?nf|cfg|neon|ya?ml|ts|typoscript|tsconfig|dist|in[ci]|log|sh|sql(?:\\..*)?|sqlite(?:\\..*)?|sw[op]|git.*|rc)$|^/(?:fileadmin|typo3temp|uploads)/.*\\.(?:php\\d?|phtml|phar)(?:/|$)
+	}
+	handle @denied {
+		respond 403
+	}
+
 	# Browser-navigation UX guard: install-tool controllers other than `layout`
 	# (maintenance/settings/upgrade/environment/icon) return JsonResponse
 	# envelopes meant for the install tool's own JS to inject into a modal.
@@ -329,6 +367,11 @@ CADDY;
                 ? "\n\tfrankenphp {\n\t\tworker {\$FRANKENPHP_WORKER_FILE:{$root}/worker.php} {\$FRANKENPHP_WORKER_COUNT:4}\n\t}\n"
                 : '';
 
+            // Caddy enables its admin API on localhost:2019 by default; any
+            // local process could reconfigure the server. Off unless metrics
+            // need it.
+            $adminBlock = $prometheus ? '' : "\n\tadmin off\n";
+
             // Production: real ports (80/443), ACME-auto-managed TLS via
             // Caddy's site-address shorthand (no scheme prefix = HTTP→HTTPS
             // redirect + ACME provisioning for {$SERVER_NAME}), HSTS &
@@ -337,7 +380,7 @@ CADDY;
 {
 	http_port {\$HTTP_PORT:80}
 	https_port {\$HTTPS_PORT:443}
-{$workerBlock}{$metricsGlobal}
+{$adminBlock}{$workerBlock}{$metricsGlobal}
 	# https://caddyserver.com/docs/caddyfile/directives#sorting-algorithm
 	order mercure after encode
 	order vulcain after reverse_proxy
@@ -357,6 +400,7 @@ CADDY;
 			fields {
 				uri query {
 					replace authorization REDACTED
+					replace token REDACTED
 				}
 			}
 		}
@@ -408,12 +452,13 @@ CADDYFILE;
 # HTTP on 8888, HTTPS on 8885
 http://{\$SERVER_NAME:localhost}:{\$HTTP_PORT:8888}, https://{\$SERVER_NAME:localhost}:{\$HTTPS_PORT:8885} {
 	log {
-		# Redact the authorization query parameter that can be set by Mercure
+		# Redact Mercure's authorization and TYPO3's backend CSRF token
 		format filter {
 			wrap console
 			fields {
 				uri query {
 					replace authorization REDACTED
+					replace token REDACTED
 				}
 			}
 		}
@@ -606,7 +651,7 @@ expose_php = Off
 display_errors = Off
 display_startup_errors = Off
 log_errors = On
-error_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT
+error_reporting = E_ALL & ~E_DEPRECATED
 
 ; Assertions disabled (zend.assertions=-1 strips them at compile time).
 zend.assertions = -1
