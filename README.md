@@ -90,6 +90,16 @@ headers: `X-FrankenPHP-Discarded` (instances dropped before the request; should 
 leak) and `X-FrankenPHP-Reset-Us` (microseconds the reset took). Details, including measured costs:
 [Documentation/WorkerMode.md](Documentation/WorkerMode.md).
 
+### What a request costs
+
+Measured on the sandbox (SQLite, 10 cores): a cached frontend page takes 7 ms end to end with one
+client and 11 to 13 ms at 100 concurrent users on 8 worker threads. The extension's own per-request
+work is 0.2 ms for the reset plus about 1 ms to rebuild the discarded services; the rest is TYPO3
+reading its caches from SQLite. Database connections now survive requests, which halved the
+latency under load. The full breakdown, the 100-user matrix and the deployment checklist for a
+10 ms target (MariaDB, Redis or APCu caches, thread sizing) are in
+[Documentation/Performance.md](Documentation/Performance.md).
+
 ### Adapting an extension for worker mode
 
 Under PHP-FPM every request starts from a fresh process. In a worker, DI service instances live until something drops
