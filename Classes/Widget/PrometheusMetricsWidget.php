@@ -89,17 +89,10 @@ final readonly class PrometheusMetricsWidget implements
     ];
 
     public function __construct(
-        // $configuration is required by the cms-dashboard DI compiler pass
-        // (it's named-injected for every dashboard.widget tagged service),
-        // and gives us the widget identifier / static metadata. We surface
-        // it to the Fluid template so callers can reference it if they
-        // ever override the template.
         private WidgetConfigurationInterface $configuration,
         private BackendViewFactory           $backendViewFactory,
         private UriBuilder                   $uriBuilder,
-    )
-    {
-    }
+    ) {}
 
     public function getSettingsDefinitions(): array
     {
