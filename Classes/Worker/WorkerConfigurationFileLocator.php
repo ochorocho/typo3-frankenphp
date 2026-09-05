@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Ochorocho\FrankenPhp\Worker;
 
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use TYPO3\CMS\Core\Cache\Frontend\NullFrontend;
 use TYPO3\CMS\Core\Core\Bootstrap;
 use TYPO3\CMS\Core\Core\Environment;
@@ -26,15 +28,19 @@ final class WorkerConfigurationFileLocator
     public const string PROJECT_ORIGIN = 'project';
 
     /**
+     * @param (\Closure(): PackageManager)|null $packageManagerFactory defaults to the Bootstrap helpers
+     */
+    public function __construct(
+        private readonly ?\Closure $packageManagerFactory = null,
+        private readonly LoggerInterface $logger = new NullLogger(),
+    ) {}
+
+    /**
      * @return array<string, string> origin => absolute path, packages in dependency order, project last
      */
     public function locate(): array
     {
-        $packagePaths = [];
-        foreach ($this->createPackageManager()->getActivePackages() as $package) {
-            $packagePaths[$package->getPackageKey()] = $package->getPackagePath();
-        }
-        return $this->locateIn($packagePaths, Environment::getConfigPath());
+        return $this->locateIn($this->packagePaths(), Environment::getConfigPath());
     }
 
     /**
@@ -57,7 +63,31 @@ final class WorkerConfigurationFileLocator
         return $files;
     }
 
-    private function createPackageManager(): PackageManager
+    /**
+     * @return array<string, string> package key => package path
+     */
+    private function packagePaths(): array
+    {
+        try {
+            $packageManager = ($this->packageManagerFactory ?? self::createPackageManager(...))();
+            $paths = [];
+            foreach ($packageManager->getActivePackages() as $package) {
+                $paths[$package->getPackageKey()] = $package->getPackagePath();
+            }
+            return $paths;
+        } catch (\Throwable $exception) {
+            // The Bootstrap helpers are @internal and may change between Core
+            // releases. Booting with the default classification beats taking
+            // the site down, but the package files are then unused: say so.
+            $this->logger->error(
+                'Cannot enumerate packages, every {file} is ignored until this is fixed: {error}',
+                ['file' => self::PACKAGE_FILE, 'error' => $exception->getMessage(), 'exception' => $exception]
+            );
+            return [];
+        }
+    }
+
+    private static function createPackageManager(): PackageManager
     {
         // NullFrontend: the package cache only matters in classic mode and
         // must not write into the real core cache from inside a compile.

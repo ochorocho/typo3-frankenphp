@@ -11,6 +11,8 @@ use Ochorocho\FrankenPhp\Worker\WorkerConfigurationLoader;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+use TYPO3\CMS\Core\Log\LogManager;
+use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\CMS\Dashboard\WidgetRegistry;
 
 return static function (ContainerConfigurator $container, ContainerBuilder $containerBuilder): void {
@@ -19,7 +21,10 @@ return static function (ContainerConfigurator $container, ContainerBuilder $cont
     // RemoveBuildParametersPass at -2048. Packages tune the result through
     // Configuration/FrankenPhpWorker.php, the project through
     // config/system/frankenphp-worker.php.
-    $configuration = (new WorkerConfigurationLoader())->load((new WorkerConfigurationFileLocator())->locate());
+    $locator = new WorkerConfigurationFileLocator(
+        logger: GeneralUtility::makeInstance(LogManager::class)->getLogger(WorkerConfigurationFileLocator::class)
+    );
+    $configuration = (new WorkerConfigurationLoader())->load($locator->locate());
     $containerBuilder->addCompilerPass(
         new WorkerKeepListPass(configuration: $configuration),
         PassConfig::TYPE_AFTER_REMOVING,
