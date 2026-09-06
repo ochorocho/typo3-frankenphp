@@ -93,7 +93,7 @@ uses, so one env export covers both).
 | `backend-smoke.js`      | smoke  | 1    | 30 s     | Login + Web>Layout sanity                                        |
 | `backend-load.js`       | load   | 5    | 2 min    | Auth + nav throughput (lower VUs — session table serialises)     |
 | `backend-soak.js`       | soak   | 5    | 10 min   | WorkerStateResetter stability over thousands of authed requests |
-| `backend-recycle.js`    | recycle| 1    | ~2 min   | MAX_REQUESTS + 50 sequential authed GETs across a worker recycle |
+| `backend-recycle.js`    | recycle| 1    | ~2 min   | MAX_REQUESTS x 1.1 + 50 sequential authed GETs across a worker recycle (limits are jittered per worker) |
 | `backend-multiuser.js`  | load   | 2+2  | 3 min    | Admin and restricted editor interleaved on the same workers; role markers must never leak |
 | `install-tool-smoke.js` | smoke  | 1    | 30 s     | `?__typo3_install` routes to failsafe                            |
 | `install-tool-load.js`  | load   | 10   | 2 min    | Per-request `/index.php` path under load                         |

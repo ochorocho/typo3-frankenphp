@@ -5,7 +5,8 @@
  * loop after that many requests, which signals FrankenPHP to spawn a fresh
  * PHP worker. The point of the recycle is to bound memory growth from
  * leaks we haven't (or can't) yet plug. This scenario exercises the
- * boundary: it issues MAX_REQUESTS + 50 sequential authenticated GETs,
+ * boundary: it issues MAX_REQUESTS * 1.1 + 50 sequential authenticated GETs
+ * (every worker jitters its own limit by up to 10 %),
  * crossing the recycle line, and asserts every response (including the
  * first request handled by the brand-new replacement worker) still:
  *
@@ -36,7 +37,7 @@
  * thousands of requests.
  *
  *   k6 run scenarios/backend-recycle.js
- *   k6 run --env ITERATIONS=1100 scenarios/backend-recycle.js   # MAX_REQUESTS=1000
+ *   k6 run --env ITERATIONS=1150 scenarios/backend-recycle.js   # MAX_REQUESTS=1000
  */
 
 import http from 'k6/http';
@@ -45,7 +46,8 @@ import {CONFIG} from '../lib/config.js';
 import {loginOncePerVU, BACKEND_REQUEST_PARAMS} from '../lib/auth.js';
 import {okStatus, looksLikeBackend, noPHPError, noSecurityTokenError} from '../lib/checks.js';
 
-const ITERATIONS = parseInt(__ENV.ITERATIONS || '550', 10);
+// MAX_REQUESTS=500 plus the worker's +/-10 % jitter (at most 550) plus 50 past the boundary.
+const ITERATIONS = parseInt(__ENV.ITERATIONS || '600', 10);
 
 export const options = {
     insecureSkipTLSVerify: true,
@@ -58,7 +60,7 @@ export const options = {
         },
     },
     thresholds: {
-        // Allow up to 1% (5-6 in 550) hiccups for the recycle boundary
+        // Allow up to 1% (about 6 in 600) hiccups for the recycle boundary
         // itself — empirically 3-4 requests miss the backend shell when
         // a worker exits mid-flight and the replacement boots. A higher
         // rate would signal a real regression.

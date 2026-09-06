@@ -48,6 +48,12 @@ final class InitCommandTest extends TestCase
         // The Caddyfile placeholder defaults mirror .env: Caddy only reads .env with --envfile.
         preg_match('/^FRANKENPHP_WORKER_COUNT=(\\d+)$/m', $this->generated('.env'), $m);
         self::assertStringContainsString('{$FRANKENPHP_WORKER_COUNT:' . $m[1] . '}', $this->generated('Caddyfile'));
+        $numThreads = (int)$m[1] + 2;
+        self::assertStringContainsString("FRANKENPHP_NUM_THREADS={$numThreads}\n", $this->generated('.env'));
+        self::assertStringContainsString('num_threads {$FRANKENPHP_NUM_THREADS:' . $numThreads . '}', $this->generated('Caddyfile'));
+        self::assertStringContainsString("\t\t# max_threads auto\n\t\t# max_wait_time 30s\n", $this->generated('Caddyfile'));
+        self::assertStringContainsString("MAX_MEMORY_MB=0\n", $this->generated('.env'));
+        self::assertStringContainsString("#GOGC=200\n", $this->generated('.env'));
         self::assertStringContainsString('{$HTTP_PORT:80}', $this->generated('Caddyfile'));
         self::assertStringContainsString('{$HTTPS_PORT:443}', $this->generated('Caddyfile'));
         self::assertStringContainsString('MAX_REQUESTS=10000', $this->generated('.env'));

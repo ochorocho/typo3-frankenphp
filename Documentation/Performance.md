@@ -144,8 +144,11 @@ that was 2 of 18 001 requests.
    machine, and no native server is installed.
 2. Cores. Throughput scales with cores until they are busy; latency at a given request rate follows.
 3. `TYPO3_CONTEXT=Production`, `FE.debug=0`, no `adminpanel`.
-4. Threads about two per core, `MAX_REQUESTS` at 10000 or higher, a supervisor with
-   `Restart=always`.
+4. Threads about two per core (`FRANKENPHP_NUM_THREADS` two above the worker count),
+   `MAX_REQUESTS` at 10000 or higher (each worker jitters its own limit by up to 10 %),
+   `MAX_MEMORY_MB` as a leak guard, a supervisor with `Restart=always`. `max_threads auto` and
+   `max_wait_time` are commented examples in the generated Caddyfile; `GOGC` / `GOMEMLIMIT`
+   in `.env`.
 5. Measure at a request rate with think time, not in a closed loop, when the question is
    "how fast is a page": the closed-loop average only reports how many clients share the CPU.
 6. For sub-millisecond cached pages, a static or edge cache in front of the worker.

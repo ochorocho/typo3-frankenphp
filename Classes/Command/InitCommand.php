@@ -419,7 +419,7 @@ CADDY;
 
         if ($isProd) {
             $workerBlock = $workerMode
-                ? "\n\tfrankenphp {\n\t\tworker {\$FRANKENPHP_WORKER_FILE:{$root}/worker.php} {\$FRANKENPHP_WORKER_COUNT:{$workers}}\n\t}\n"
+                ? $this->frankenphpBlock($root, $workers)
                 : '';
 
             // Caddy enables its admin API on localhost:2019 by default; any
@@ -484,7 +484,7 @@ CADDYFILE;
 
         // Development profile (default).
         $workerBlock = $workerMode
-            ? "\n\tfrankenphp {\n\t\tworker {\$FRANKENPHP_WORKER_FILE:{$root}/worker.php} {\$FRANKENPHP_WORKER_COUNT:{$workers}}\n\t}\n"
+            ? $this->frankenphpBlock($root, $workers)
             : '';
 
         return <<<CADDYFILE
@@ -534,6 +534,36 @@ http://{\$SERVER_NAME:localhost}:{\$HTTP_PORT:{$httpPort}}, https://{\$SERVER_NA
 CADDYFILE;
     }
 
+    /**
+     * The `frankenphp {}` global block. `num_threads` is the PHP thread pool;
+     * the workers take most of it, the rest serves the per-request
+     * ?__typo3_install route. `max_threads` / `max_wait_time` are left as
+     * commented examples: autoscaling and bounded queueing are deployment
+     * decisions (a hit `max_wait_time` returns 504 instead of queueing).
+     */
+    private function frankenphpBlock(string $root, string $workers): string
+    {
+        $numThreads = self::numThreads($workers);
+        return "\n\tfrankenphp {\n"
+            . "\t\tworker {\$FRANKENPHP_WORKER_FILE:{$root}/worker.php} {\$FRANKENPHP_WORKER_COUNT:{$workers}}\n"
+            . "\t\t# PHP threads: the workers above plus spare threads for the per-request\n"
+            . "\t\t# ?__typo3_install route. Must stay above the worker count.\n"
+            . "\t\tnum_threads {\$FRANKENPHP_NUM_THREADS:{$numThreads}}\n"
+            . "\t\t# Autoscale threads under load and bound the queue (504 when exceeded):\n"
+            . "\t\t# max_threads auto\n"
+            . "\t\t# max_wait_time 30s\n"
+            . "\t}\n";
+    }
+
+    /**
+     * Two spare threads next to the workers: one would do for the install
+     * tool, the second keeps a slow install-tool request from blocking it.
+     */
+    private static function numThreads(string $workers): int
+    {
+        return max(1, (int)$workers) + 2;
+    }
+
     private function buildEnvFile(
         string $phpIniScanDir,
         string $typo3Context,
@@ -546,15 +576,34 @@ CADDYFILE;
     ): string {
         $workerEnv = '';
         if ($workerCount !== null && $maxRequests !== null) {
+            $numThreads = self::numThreads($workerCount);
             $workerEnv = <<<ENV
 
 # FrankenPHP worker configuration.
 # Worker threads block on the database; size them at about two per core.
+# FRANKENPHP_NUM_THREADS is the PHP thread pool: the workers plus spare
+# threads for the per-request ?__typo3_install route. Keep it above
+# FRANKENPHP_WORKER_COUNT.
 # MAX_REQUESTS recycles a worker: each recycle costs a 1-2 s boot, and a
 # recycle storm (500 at 800 req/s = 16 restarts/s) crashed FrankenPHP 1.12
-# under load. Lower it only if a soak test shows memory growth.
+# under load. Lower it only if a soak test shows memory growth. Every worker
+# adds a random +/-10 % to its own limit so a pool started together does not
+# recycle in lockstep.
+# MAX_MEMORY_MB recycles a worker once memory_get_usage(true) exceeds it after
+# a request; 0 disables the check. The sandbox measured 100-140 MB at rest and
+# 340 MB at the peak of a 200-user spike, so 512 is a sane leak guard.
 FRANKENPHP_WORKER_COUNT={$workerCount}
+FRANKENPHP_NUM_THREADS={$numThreads}
 MAX_REQUESTS={$maxRequests}
+MAX_MEMORY_MB=0
+
+# Go runtime knobs (all optional, read by FrankenPHP's Go side):
+# GOMAXPROCS  defaults to all cores; below the PHP thread count it costs
+#             throughput (php/frankenphp#382).
+# GOGC        200 halves GC CPU for twice the Go heap (PHP memory is separate).
+# GOMEMLIMIT  set to the container's memory limit when running in one.
+#GOGC=200
+#GOMEMLIMIT=1GiB
 ENV;
         }
 

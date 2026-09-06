@@ -257,12 +257,27 @@ for non-existent page ids.
 
 ### What a recycle looks like
 
-With `MAX_REQUESTS=500` a worker exits after 500 requests and FrankenPHP boots
-a replacement. In the measurements above that costs one request per boundary
-(a few hundred ms on the frontend, up to 2 s for the first backend request)
-and 3-4 requests per boundary that miss the backend shell in
-`backend-recycle.js`. Neither affects p95. Treat a `max` outlier without a
-p95 change as a recycle, and sustained per-minute drift as a leak.
+With `MAX_REQUESTS=500` a worker exits after about 500 requests and FrankenPHP
+boots a replacement. Each worker adds a random +/-10 % to its own limit
+(`WorkerLifetime`), so a pool started together does not recycle in lockstep:
+ten workers hitting 10000 requests in the same second was the recycle storm
+that crashed FrankenPHP 1.12.6 under load. `MAX_MEMORY_MB` (default 0, off)
+recycles a worker whose `memory_get_usage(true)` exceeds the limit after a
+request; a limit below the boot footprint is ignored with a log line, since it
+would otherwise recycle after every request.
+
+In the measurements above a recycle costs one request per boundary (a few
+hundred ms on the frontend, up to 2 s for the first backend request) and 3-4
+requests per boundary that miss the backend shell in `backend-recycle.js`.
+Neither affects p95. Treat a `max` outlier without a p95 change as a recycle,
+and sustained per-minute drift as a leak.
+
+A boot warm-up was considered and measured instead of built: after a fresh
+boot with warm TYPO3 file caches only the very first request of the whole pool
+is slow (166 ms frontend, 126 ms backend login page); every other thread's
+first request costs the usual 5-10 ms, because opcache and TYPO3's caches are
+process-wide and the kept services are cheap to construct. The 2 s first
+requests in the 2026-09-04 table were cold TYPO3 caches, not cold threads.
 
 ## Findings worth fixing in Core
 

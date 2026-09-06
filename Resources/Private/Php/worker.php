@@ -11,6 +11,7 @@ declare(strict_types=1);
  */
 
 use Ochorocho\FrankenPhp\Worker\RuntimeCacheInventory;
+use Ochorocho\FrankenPhp\Worker\WorkerLifetime;
 use Ochorocho\FrankenPhp\Worker\WorkerRequestCycle;
 use Ochorocho\FrankenPhp\Worker\WorkerStateResetter;
 use TYPO3\CMS\Core\Core\Bootstrap;
@@ -224,11 +225,17 @@ $handler = static function () use ($container, $cycle, $applicationClass, $worke
     }
 };
 
-// WORKER LOOP — bounded by MAX_REQUESTS to mitigate memory leaks in third-party
-// libraries that were never designed for long-running processes.
-$maxRequests = (int)($_SERVER['MAX_REQUESTS'] ?? 0);
-for ($nbRequests = 0; !$maxRequests || $nbRequests < $maxRequests; ++$nbRequests) {
+// WORKER LOOP — bounded by MAX_REQUESTS (with a per-worker jitter so the pool
+// does not recycle in lockstep) and MAX_MEMORY_MB, both mitigating memory
+// leaks in third-party libraries never designed for a long-running process.
+$lifetime = WorkerLifetime::fromEnvironment($_SERVER, memory_get_usage(true));
+if ($lifetime->warning !== null) {
+    error_log('TYPO3 Worker: ' . $lifetime->warning);
+}
+$handledRequests = 0;
+while ($lifetime->allowsAnotherRequest($handledRequests, memory_get_usage(true))) {
     $keepRunning = \frankenphp_handle_request($handler);
+    $handledRequests++;
     gc_collect_cycles();
     if (!$keepRunning) {
         break;
