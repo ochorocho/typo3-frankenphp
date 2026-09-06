@@ -209,6 +209,22 @@ request-bound and stay flushed; keys that are a hash of their inputs
 (`pageTsConfig-hash-to-object-<hash>`, labels, table schema) can be kept
 because a changed input produces a new key.
 
+Inventory of 2026-09-06 (the e2e suite plus a few frontend pages, about 500
+requests, grouped by `frankenphp:audit --runtime-cache`):
+
+| Key shape | Entries per request | Decision | Why |
+| --- | --- | --- | --- |
+| `labels_en_<md5>`, `labels_file_<md5>` | ~1800 | kept | XLF content, changes only on deploy (and after `cache:flush` + worker recycle) |
+| `<dbname>_<hash>-tableinfo-<table>`, `…-tablenames` | ~15 | kept | DB schema, changes only on deploy; the rule now also matches MySQL/MariaDB (it used to match SQLite only) |
+| `icon-factory-<xxh3>` | ~23 | flushed | the cached `Icon` instance is handed out as is and Core calls `setTitle()` on it, so a kept icon would carry one request's title into the next |
+| `pageTsConfig-hash-to-object-<xxh3>` | ~5 (backend) | flushed | `PageTsConfigFactory` merges the current user's `page.*` TSconfig into the object, but the key hashes only site, condition verdicts and rootline TSconfig: kept, one user's overrides would reach the next user |
+| `sites-configuration`, `sites-root-id-to-identifier` | 5 | flushed | edited at runtime through the Site Management module; another worker would not see the change |
+| `formprotection-instance-<xxh3>` | 4 | flushed | per user session |
+| `rootline-*`, `PageRepository_*`, `backendUtility*`, `getPageForRootlineStatement-<md5>`, everything with a uid or pid | rest | flushed | record data or prepared statements bound to a connection |
+
+The tool exists so that the next candidate is judged the same way instead of
+by the size of its number.
+
 k6 load scenarios (`Tests/load`, 2 minutes each):
 
 | Scenario | old blacklist | discard-by-default (shipped) |
@@ -271,6 +287,14 @@ because the process dies after every request.
 - `DataHandler::$recordsToClearCacheFor` and `PublicUrlPrefixer::$isProcessingUrl`
   are static and only reset on the happy path.
 - `SystemEnvironmentBuilder` sets `EXEC_TIME` & co. once per process.
+- `BackendUtility::getPagesTSconfig()` caches the `PageTsConfig` object in
+  `cache.runtime` under a hash of site, condition verdicts and rootline
+  TSconfig, but `PageTsConfigFactory::create()` also merges the current user's
+  `page.*` user TSconfig into it. The key is incomplete for anything that
+  outlives a request.
+- `IconFactory::getIcon()` returns the cached `Icon` instance itself and
+  callers mutate it (`setTitle()`, `setSize()`), so the runtime-cache entry
+  carries the last caller's title even within one request.
 
 ## Audit of TYPO3 14.3 (sandbox: core extensions + dashboard, form, workspaces, adminpanel)
 

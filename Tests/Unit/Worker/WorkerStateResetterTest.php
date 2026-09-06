@@ -176,6 +176,12 @@ final class WorkerStateResetterTest extends TestCase
         yield 'rootline' => ['rootline-localcache-1_0_0_0', false];
         yield 'page row' => ['PageRepository_getPage_0af1b2c3', false];
         yield 'looks like table info but is a record cache' => ['ContentFetcher_tableinfo-1', false];
+        // Rejected by the 2026-09-06 inventory: IconFactory hands out the cached
+        // Icon itself and Core calls setTitle() on it; the page TSconfig object
+        // merges the current user's TSconfig overrides but its key does not hash them.
+        yield 'icon markup' => ['icon-factory-0af1b2c3d4e5f607', false];
+        yield 'page TSconfig object' => ['pageTsConfig-hash-to-object-0af1b2c3d4e5f607', false];
+        yield 'site configuration' => ['sites-configuration', false];
     }
 
     #[Test]
