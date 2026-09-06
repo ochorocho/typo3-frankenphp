@@ -1,0 +1,314 @@
+"""Render Tests/perf/RESULTS.md from Tests/perf/data/. Called by perfstats.sh.
+
+Reports per page and per category, not as a sum over the whole URL set: "a course detail
+page went from 2024 ms to 1167 ms" is a number somebody can act on, the sum of twenty
+unrelated pages is not. The set total is still printed once, because the goal of the
+exercise was phrased over the whole set.
+"""
+import csv
+import statistics
+import subprocess
+import sys
+from pathlib import Path
+
+PERF_DIR = Path(__file__).resolve().parent
+DATA = PERF_DIR / "data"
+OUT = PERF_DIR / "RESULTS.md"
+baseline = sys.argv[1] if len(sys.argv) > 1 else "baseline"
+
+
+def read_tsv(path):
+    with path.open() as handle:
+        return list(csv.DictReader(handle, delimiter="\t"))
+
+
+index_path = DATA / "index.tsv"
+if not index_path.exists():
+    sys.exit("no measurements yet: " + str(index_path))
+
+runs = [r for r in read_tsv(index_path) if (DATA / r["label"] / "summary.tsv").exists()]
+
+
+def history_position(run):
+    """Order labels by where their commit sits in git history, not by when they were
+    measured - a re-measurement of the whole series runs in whatever order is convenient,
+    and the report has to read as a progression regardless."""
+    try:
+        out = subprocess.run(["git", "rev-list", "--count", run["commit"]],
+                             capture_output=True, text=True, timeout=10)
+        if out.returncode == 0:
+            return (0, int(out.stdout.strip()), run["date"])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    # unknown commit (reworded, dropped): keep it, sorted by date, after the known ones
+    return (1, 0, run["date"])
+
+
+runs.sort(key=history_position)
+if not any(r["label"] == baseline for r in runs):
+    sys.exit(f"baseline label {baseline!r} not found in {index_path}")
+
+rows, meta = {}, {}
+for run in runs:
+    rows[run["label"]] = {r["id"]: r for r in read_tsv(DATA / run["label"] / "summary.tsv")}
+    for r in rows[run["label"]].values():
+        meta.setdefault(r["id"], r)
+
+base = rows[baseline]
+ids = list(base)
+labels = [r["label"] for r in runs]
+
+# A label ending in -recheck re-measures code that another label already covered. It is a
+# control, not a step: it never becomes the "current" state, and the difference to its twin
+# is the measurement noise of that session.
+controls = [r for r in runs if r["label"].endswith("-recheck")]
+progression = [r for r in runs if not r["label"].endswith("-recheck")]
+
+
+def current_head():
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=10)
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+head = current_head()
+latest = next(
+    (r["label"] for r in progression
+     if head and (r["commit"].startswith(head) or head.startswith(r["commit"]))),
+    progression[-1]["label"] if progression else labels[-1],
+)
+
+
+def per_page_noise(column):
+    """Per-page spread between a control and its twin. Single pages move far more than the
+    total does, so a per-page claim needs a much larger threshold than a total."""
+    spreads = []
+    for control in controls:
+        twin = control["label"][: -len("-recheck")]
+        if twin not in rows:
+            continue
+        for i in base:
+            if i in rows[twin] and i in rows[control["label"]]:
+                a = float(rows[twin][i][column])
+                b = float(rows[control["label"]][i][column])
+                if a:
+                    spreads.append(abs(b - a) * 100.0 / a)
+    if not spreads:
+        return 0.0, 0.0
+    spreads.sort()
+    return statistics.median(spreads), spreads[-1]
+
+
+def noise_percent(column):
+    """Largest spread between a control and the label it repeats, in percent of the total."""
+    worst = 0.0
+    for control in controls:
+        twin = control["label"][:-len("-recheck")]
+        if twin not in rows:
+            continue
+        a = sum(float(r[column]) for i, r in rows[twin].items() if i in base)
+        b = sum(float(r[column]) for i, r in rows[control["label"]].items() if i in base)
+        if a:
+            worst = max(worst, abs(b - a) * 100.0 / a)
+    return worst
+
+
+def factor(before, after):
+    """How many times faster. >1 is faster, <1 slower."""
+    return before / after if after else 0.0
+
+
+def med(values):
+    return round(statistics.median(values), 1) if values else 0
+
+
+def cell(label, id_, column):
+    row = rows[label].get(id_)
+    return float(row[column]) if row else None
+
+
+def category_values(label, category, column):
+    return [cell(label, i, column) for i in ids
+            if meta[i]["category"] == category and cell(label, i, column) is not None]
+
+
+lines = []
+w = lines.append
+w("# Performance results")
+w("")
+w(f"Generated by `bash Tests/perf/perfstats.sh`, baseline `{baseline}`. Do not edit - it is")
+w("derived from `Tests/perf/data/` and overwritten on every measurement.")
+w("")
+w("All times are TTFB in ms for **one page**, median over the repeats. Cold = first call")
+w("after the page cache was dropped, warm = second call. **Factor** is baseline divided by")
+w("the current label, so 2.00x means twice as fast.")
+w("")
+
+noise_cold = noise_percent("c1_ms")
+noise_warm = noise_percent("c2_ms")
+if controls:
+    w("## Measurement noise")
+    w("")
+    w("Measured, not assumed: a `-recheck` label re-runs code an earlier label already")
+    w("covered, so the difference between them is what this machine does on its own.")
+    w("")
+    w("| control | repeats | cold total | warm total |")
+    w("|---|---|---:|---:|")
+    for control in controls:
+        twin = control["label"][: -len("-recheck")]
+        if twin not in rows:
+            continue
+        a1 = sum(float(r["c1_ms"]) for i, r in rows[twin].items() if i in base)
+        b1 = sum(float(r["c1_ms"]) for i, r in rows[control["label"]].items() if i in base)
+        a2 = sum(float(r["c2_ms"]) for i, r in rows[twin].items() if i in base)
+        b2 = sum(float(r["c2_ms"]) for i, r in rows[control["label"]].items() if i in base)
+        w(f"| `{control['label']}` | `{twin}` | {a1} -> {b1} ms ({(b1 - a1) * 100.0 / a1:+.1f}%) "
+          f"| {a2} -> {b2} ms ({(b2 - a2) * 100.0 / a2:+.1f}%) |")
+    w("")
+    page_cold_med, page_cold_worst = per_page_noise("c1_ms")
+    page_warm_med, page_warm_worst = per_page_noise("c2_ms")
+    w(f"**On the totals, a change below {max(noise_cold, 1.0):.1f}% cold or "
+      f"{max(noise_warm, 1.0):.1f}% warm is not a result.** Rows within that are marked")
+    w("*noise* below.")
+    w("")
+    w(f"**A single page moves far more on its own: {page_cold_med:.1f}% median and up to "
+      f"{page_cold_worst:.1f}% cold, {page_warm_med:.1f}% median and up to {page_warm_worst:.1f}% "
+      "warm**, with no code change at all. So a per-page or per-category factor near 1.0 says")
+    w("nothing, and the per-page median of the whole set is the least stable figure here - it")
+    w("is one page's value and hops between neighbours. Quote the totals, or a named page that")
+    w("moved by much more than its own noise.")
+    w("")
+
+# --- per category -------------------------------------------------------------------
+w(f"## Per category, `{baseline}` -> `{latest}`")
+w("")
+w("Median of the pages in the category, and the single page that moved most, because a")
+w("category median hides an outlier and this set has one.")
+w("")
+w("### Cold - the uncached request")
+w("")
+w("| category | pages | before | now | factor | biggest single win |")
+w("|---|---:|---:|---:|---:|---|")
+categories = sorted({meta[i]["category"] for i in ids},
+                    key=lambda c: -med(category_values(baseline, c, "c1_ms")))
+for category in categories:
+    members = [i for i in ids if meta[i]["category"] == category and cell(latest, i, "c1_ms")]
+    c1b, c1n = med(category_values(baseline, category, "c1_ms")), med(category_values(latest, category, "c1_ms"))
+    best = max(members, key=lambda i: factor(cell(baseline, i, "c1_ms"), cell(latest, i, "c1_ms")), default=None)
+    note = "-"
+    if best is not None:
+        note = (f"`{best}` {cell(baseline, best, 'c1_ms')} -> {cell(latest, best, 'c1_ms')} ms, "
+                f"{factor(cell(baseline, best, 'c1_ms'), cell(latest, best, 'c1_ms')):.2f}x")
+    flag = " *noise*" if c1b and abs(c1n - c1b) * 100.0 / c1b <= noise_cold else ""
+    w(f"| {category} | {len(members)} | {c1b} ms | {c1n} ms | {factor(c1b, c1n):.2f}x{flag} | {note} |")
+allc1b = [cell(baseline, i, "c1_ms") for i in ids]
+allc1n = [cell(latest, i, "c1_ms") for i in ids if cell(latest, i, "c1_ms") is not None]
+w(f"| **median page** | {len(ids)} | **{med(allc1b)} ms** | **{med(allc1n)} ms** "
+  f"| **{factor(med(allc1b), med(allc1n)):.2f}x** | |")
+w("")
+w("### Warm - the cached request")
+w("")
+w("Fully cached pages still run the middlewares before the cache is served, which is why")
+w("they moved at all. Only the main site did - MTAE and STAE were already at ~40 ms.")
+w("")
+w("| category | pages | before | now | factor |")
+w("|---|---:|---:|---:|---:|")
+for category in categories:
+    members = [i for i in ids if meta[i]["category"] == category and cell(latest, i, "c2_ms") is not None]
+    c2b, c2n = med(category_values(baseline, category, "c2_ms")), med(category_values(latest, category, "c2_ms"))
+    flag = " *noise*" if c2b and abs(c2n - c2b) * 100.0 / c2b <= noise_warm else ""
+    w(f"| {category} | {len(members)} | {c2b} ms | {c2n} ms | {factor(c2b, c2n):.2f}x{flag} |")
+allc2b = [cell(baseline, i, "c2_ms") for i in ids]
+allc2n = [cell(latest, i, "c2_ms") for i in ids if cell(latest, i, "c2_ms") is not None]
+w(f"| **median page** | {len(ids)} | **{med(allc2b)} ms** | **{med(allc2n)} ms** "
+  f"| **{factor(med(allc2b), med(allc2n)):.2f}x** |")
+w("")
+w(f"Summed over all {len(ids)} pages the cold time is {sum(allc1b)} ms -> {sum(allc1n)} ms "
+  f"({factor(sum(allc1b), sum(allc1n)):.2f}x). A sum over unrelated pages is dominated by "
+  "whichever one is slowest, so it answers \"what does this mix of pages cost the server\" "
+  "and nothing about one page. It is however the most stable figure the harness produces - "
+  "see the noise section - so quote it, or a named page, but not the median.")
+w("")
+
+# --- per url ------------------------------------------------------------------------
+w("## Per URL")
+w("")
+w("| id | site | lang | category | cold before | cold now | factor | warm before | warm now |")
+w("|---|---|---|---|---:|---:|---:|---:|---:|")
+for i in sorted(ids, key=lambda x: -(cell(baseline, x, "c1_ms") - (cell(latest, x, "c1_ms") or 0))):
+    c1b, c1n = cell(baseline, i, "c1_ms"), cell(latest, i, "c1_ms")
+    c2b, c2n = cell(baseline, i, "c2_ms"), cell(latest, i, "c2_ms")
+    if c1n is None:
+        w(f"| `{i}` | {meta[i]['site']} | {meta[i]['lang']} | {meta[i]['category']} | {c1b} ms | - | - | {c2b} ms | - |")
+        continue
+    w(f"| `{i}` | {meta[i]['site']} | {meta[i]['lang']} | {meta[i]['category']} | {c1b} ms | {c1n} ms "
+      f"| {factor(c1b, c1n):.2f}x | {c2b} ms | {c2n} ms |")
+w("")
+
+# --- per run ------------------------------------------------------------------------
+w("## Per run")
+w("")
+w("Totals are the figure to read - the median moves on its own, see the noise section.")
+w("")
+w("| label | date | commit | cold total | warm total | note |")
+w("|---|---|---|---:|---:|---|")
+for run in runs:
+    label = run["label"]
+    t1 = sum(float(r["c1_ms"]) for i, r in rows[label].items() if i in base)
+    t2 = sum(float(r["c2_ms"]) for i, r in rows[label].items() if i in base)
+    marker = " **(control)**" if label.endswith("-recheck") else ""
+    current = " **(current)**" if label == latest else ""
+    w(f"| `{label}`{marker}{current} | {run['date'][:16].replace('T', ' ')} | {run['commit']} "
+      f"| {t1} ms | {t2} ms | {run['note'] or '-'} |")
+w("")
+
+# --- movers -------------------------------------------------------------------------
+if latest != baseline:
+    w("## Biggest movers, cold call")
+    w("")
+    moved = sorted(
+        ((cell(baseline, i, "c1_ms") - cell(latest, i, "c1_ms"), i) for i in ids if cell(latest, i, "c1_ms")),
+        reverse=True)
+    w("| id | before | now | saved | factor | url |")
+    w("|---|---:|---:|---:|---:|---|")
+    for saved, i in moved:
+        before, after = cell(baseline, i, "c1_ms"), cell(latest, i, "c1_ms")
+        w(f"| `{i}` | {before} ms | {after} ms | {saved:+d} ms | {factor(before, after):.2f}x | {meta[i]['url']} |")
+    w("")
+
+# --- content safety -----------------------------------------------------------------
+w("## Content safety")
+w("")
+w("A page that got faster and smaller probably lost content. Status codes that differ from")
+w("the baseline, and body sizes that differ by more than 1%:")
+w("")
+w("The 1% tolerance is not laziness: course detail pages rotate a related-courses block per")
+w("render and move by a few hundred bytes on their own, with no code change at all. A page")
+w("that really lost its content loses a third to a half.")
+w("")
+changed = []
+for label in labels:
+    if label == baseline:
+        continue
+    for i in ids:
+        row = rows[label].get(i)
+        if not row:
+            continue
+        before, after = int(base[i]["size"]), int(row["size"])
+        drift = abs(after - before) / before * 100 if before else 0
+        if drift > 1 or row["code"] != base[i]["code"]:
+            changed.append((label, i, base[i]["code"], row["code"], before, after))
+if changed:
+    w("| label | id | code | size |")
+    w("|---|---|---|---|")
+    for label, i, c0, c1, s0, s1 in changed:
+        w(f"| `{label}` | `{i}` | {c0} -> {c1} | {s0} -> {s1} |")
+else:
+    w("None - every label renders the same status code and the same body size as the baseline.")
+w("")
+
+OUT.write_text("\n".join(lines) + "\n")
+print(f"report: {OUT}")

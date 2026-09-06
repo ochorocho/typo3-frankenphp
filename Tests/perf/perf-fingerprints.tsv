@@ -1,0 +1,9 @@
+# id	canonical	title
+# Recorded by perf-leak.sh --learn. The title identifies the page that actually
+# rendered; the canonical must match the requested URL.
+c-start	/camino/	Camino: Camino
+c-compare	/camino/camino-route-comparison	Camino: Camino Route Comparison
+c-packing	/camino/packing-list	Camino: Packing List
+c-faqs	/camino/faqs	Camino: FAQs
+c-privacy	/camino/privacy	Camino: Privacy
+c-imprint	/camino/imprint	Camino: Imprint

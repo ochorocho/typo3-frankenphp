@@ -1,0 +1,14 @@
+# Cross-request leak check. Columns: id <TAB> lang <TAB> url
+#
+# The sandbox has one site and one language, so the TAE check (same slug on three sites)
+# does not apply. What can leak on a shared worker instead is one page's state into the
+# next request: perf-leak.sh fires these back to back, cold then warm, and checks that every
+# response is the page that was asked for (canonical + title), carries no other page's
+# title, has a fresh CSP nonce that matches its header, and is byte-identical across
+# repeats apart from the nonce.
+c-start	en-US	https://localhost:8885/camino/
+c-compare	en-US	https://localhost:8885/camino/camino-route-comparison
+c-packing	en-US	https://localhost:8885/camino/packing-list
+c-faqs	en-US	https://localhost:8885/camino/faqs
+c-privacy	en-US	https://localhost:8885/camino/privacy
+c-imprint	en-US	https://localhost:8885/camino/imprint

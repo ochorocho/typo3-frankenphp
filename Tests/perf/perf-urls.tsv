@@ -1,0 +1,14 @@
+# Performance measurement URL set for the Build/ sandbox (Camino demo site).
+# Columns: id <TAB> site <TAB> lang <TAB> category <TAB> kind <TAB> url
+#
+# The category is what RESULTS.md aggregates by. Keyed by ID, never by position, so rows
+# may be added, removed or reordered without invalidating older labels. Reusing an ID for
+# a different URL is what breaks a comparison.
+#
+# Point the set at another instance with: bash Tests/perf/retarget-urls.sh https://localhost:8885 https://example.test
+c-start	camino	en-US	start page	start page, hero + teasers, heaviest page of the site	https://localhost:8885/camino/
+c-compare	camino	en-US	content page	route comparison, large table	https://localhost:8885/camino/camino-route-comparison
+c-packing	camino	en-US	content page	packing list, many content elements	https://localhost:8885/camino/packing-list
+c-faqs	camino	en-US	content page	FAQ accordion	https://localhost:8885/camino/faqs
+c-privacy	camino	en-US	content page	privacy, plain text	https://localhost:8885/camino/privacy
+c-imprint	camino	en-US	content page	imprint, smallest page	https://localhost:8885/camino/imprint

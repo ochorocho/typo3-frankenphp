@@ -137,6 +137,108 @@ that was 2 of 18 001 requests.
   `.env` through `helhum/dotenv-connector`, which hid the mistake. `frankenphp:init` now prints
   the correct command.
 
+## Round 6: full audit of the finished build (2026-09-06)
+
+Everything below is one session on the same machine (Apple M4, 10 cores, 32 GB, load generator
+on the same machine), FrankenPHP 1.12.6 / PHP 8.5.9 ZTS, TYPO3 14.3.4, Development context, SQLite,
+`pages` / `hash` / `rootline` on `FileBackend`, 10 workers / 12 threads, `MAX_REQUESTS=10000`,
+fresh worker pool at the start. Server-side numbers are curl or k6 `http_req_duration` unless noted.
+
+### One client
+
+| Request | keep-alive, 50 requests: mean / p50 / p90 | Notes |
+| --- | --- | --- |
+| `/camino/` (start page, 76.5 KB, 16.7 KB zstd) | 4.3 / 3 / 5 ms | p99 43 ms is the first request of a cold thread |
+| `/camino/faqs` | 3.2 / 3 / 4 ms | |
+| `/camino/packing-list` | 3.4 / 3 / 4 ms | |
+| `/typo3/login` (backend login page) | 9.0 / 9 / 10 ms | |
+| `/?__typo3_install` (per-request `index.php`, failsafe boot) | 10.4 / 10 / 11 ms | the only per-request PHP path |
+| `_assets/.../dashboard.css` (Caddy `file_server`) | 0.21 / 0 / 0 ms | never reaches PHP |
+| `/camino/` with a fresh TLS handshake per request | median 5.4 ms | the handshake is 2 ms of it |
+
+Reset headers on a warm request: `X-FrankenPHP-Reset-Us: 20`, `-Post-Reset-Us: 184`,
+`-Discarded: 67`, `-Reset-Mode: post`. First request of a freshly booted pool: 88 ms.
+
+Authenticated backend, keep-alive, 30 requests each (admin session, `Referer` set: without it
+TYPO3's referrer guard answers a 432-byte reload page instead of the module):
+
+| Request | mean / p50 / p90 / p99 | HTML |
+| --- | --- | --- |
+| `/typo3/main` (backend shell) | 20.0 / 19 / 20 / 46 ms | 290 KB |
+| Web > Layout, page 1 | 39.0 / 38 / 40 / 50 ms | 283 KB |
+| Record list (`content/records`), page 1 | 37.1 / 37 / 38 / 41 ms | 387 KB |
+
+### Fixed request rate (`frontend-latency.js`, 60 s each, 6 cached pages)
+
+| Rate | avg | median | p90 | p95 | max | dropped | checks |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 100 req/s | 3.68 ms | 3.61 ms | 4.12 ms | 4.33 ms | 15.6 ms | 0 | 100 % |
+| 200 req/s | 3.58 ms | 3.51 ms | 3.99 ms | 4.19 ms | 11.1 ms | 0 | 100 % |
+| 300 req/s | 4.60 ms | 4.51 ms | 5.31 ms | 5.60 ms | 15.0 ms | 0 | 100 % |
+| 400 req/s | 108 ms | 34 ms | 342 ms | 480 ms | 3.17 s | 726 | k6 saturates the machine |
+
+Between 3.6 and 4.6 ms up to 300 req/s; the 400 req/s row describes the load generator, not the
+server (see round 3). Run-to-run variation on the 300 req/s row within this day: 3.8 to 4.6 ms.
+
+### Throughput ceiling and closed loops
+
+| Scenario | Result |
+| --- | --- |
+| `ab -k -c 8 -n 6000 /camino/` | **1010 req/s**, mean 7.9 ms, p50 8 ms, p95 11 ms, 0 failed |
+| `ab -k -c 20 -n 6000 /camino/` | 1010 req/s, mean 19.8 ms, p50 19 ms, p95 25 ms, 0 failed |
+| `frontend-load.js`, 20 users, no think time, 2 min | 387 req/s, avg 22.5 ms, median 19.3 ms, p95 45.6 ms, 100 % checks |
+
+The cached page costs about 1 ms of CPU per core at saturation (1010 req/s on 10 cores shared with
+`ab`); rounds 1 and 2 measured 630 to 850 req/s on the same page.
+
+### Backend
+
+| Scenario | Result |
+| --- | --- |
+| `backend-load.js`, 5 users, `/typo3/main` + Web>Layout + record list, 2 min | 915 req, avg 61 ms, median 39 ms, p95 136 ms, max 737 ms, 100 % checks |
+| `backend-multiuser.js`, 2 admin + 2 editor users, 3 min | 7004 req, avg 16 ms, median 15 ms, p95 31 ms, 100 % checks: no role marker crossed users |
+
+### Stress, spike, mixed, soak
+
+| Scenario | Result |
+| --- | --- |
+| `frontend-stress.js`, ramp to 100 users, 5 min | 177 678 req at 592 req/s, avg 69 ms, median 64 ms, p95 150 ms, max 336 ms, 0 failed |
+| `frontend-spike.js`, burst to 200 users, 90 s | 80 049 req at 889 req/s, avg 150 ms, median 167 ms, p95 233 ms, max 265 ms, 0 failed |
+| `mixed-workload.js`, 8 anonymous + 2 backend users, 5 min | 3086 req, frontend avg 23 ms / p95 32 ms, backend avg 35 ms / p95 86 ms, max 564 ms, 0 failed, 100 % checks |
+| `frontend-soak.js`, 10 users with think time, 10 min | 5760 req, avg 26 ms, median 27 ms, p95 35.7 ms, max 47.8 ms, 0 failed, 100 % checks |
+
+Soak memory, sampled every 30 s: RSS 282 to 283 MB for the whole ten minutes, `X-FrankenPHP-Discarded`
+constant at 67. No drift, no recycle within the window (`MAX_REQUESTS=10000`).
+
+### Page render harness: cold and warm per page, worker versus per-request PHP
+
+`Tests/perf/perf.sh` (ported from the TAE harness, see `Tests/perf/README.md`) drops the `pages`
+and `hash` caches before each sequence and measures TTFB of the cold call and two warm calls, 3
+repeats, median, fresh connection per call (about 2 ms of every number is the TLS handshake).
+Same FrankenPHP binary and Caddyfile for both rows; only the entry script differs.
+
+| Page | worker cold | per-request cold | worker warm | per-request warm |
+| --- | --- | --- | --- | --- |
+| start page | 31.8 ms | 47.2 ms | 5.6 ms | 12.2 ms |
+| route comparison | 35.1 ms | 48.9 ms | 5.7 ms | 12.0 ms |
+| packing list | 34.6 ms | 46.2 ms | 5.6 ms | 12.4 ms |
+| FAQs | 32.1 ms | 81.8 ms | 5.5 ms | 16.7 ms |
+| privacy | 25.6 ms | 51.6 ms | 5.5 ms | 13.4 ms |
+| imprint | 24.9 ms | 35.9 ms | 5.6 ms | 12.3 ms |
+| **total, 6 pages** | **184 ms** | **312 ms (-41 % with the worker)** | **33.5 ms** | **79.0 ms (-58 % with the worker)** |
+
+The control run (`worker-recheck`, identical code) came out at 208 ms cold / 45 ms warm, i.e.
++13 % / +36 % on the totals, all of it from one page (`packing list` 52 ms cold, 16.8 ms warm in
+that run against 35 / 5.6 ms otherwise). Anything below that is noise on this machine; the worker
+versus per-request difference is far above it on every page. The warm number is the one that
+matters for a cached site: 5.6 ms against 12.3 ms per page, the bootstrap that the worker keeps.
+
+Per-request PHP through FrankenPHP (classic mode, 12 threads) also **aborted the process** when
+`frontend-latency.js` hit it at 300 req/s (`SIGABRT` on a PHP thread inside the FrankenPHP
+binary, crash report `frankenphp-2026-09-06-163732.ips`); the worker took the same run 20 times
+today without incident. Leak check (`perf-leak.sh`, canonical, title, `lang`, CSP nonce fresh
+per request and equal to the header, bodies identical across passes): all 18 responses (6 pages, cold + two warm passes) ok in worker mode.
+
 ## What the deployment has to do
 
 1. A real database server on a Unix socket instead of SQLite, and Redis or APCu cache backends.

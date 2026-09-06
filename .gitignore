@@ -6,3 +6,5 @@
 /public
 .php-cs-fixer.cache
 .phpunit.result.cache
+/Tests/perf/data/
+/Tests/perf/RESULTS.md

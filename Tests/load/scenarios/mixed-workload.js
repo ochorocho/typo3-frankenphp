@@ -25,7 +25,9 @@ import {
     looksLikeCaminoPage,
     looksLikeBackend,
     noPHPError,
-    noSecurityTokenError,, looksLikeModule} from '../lib/checks.js';
+    noSecurityTokenError,
+    looksLikeModule,
+} from '../lib/checks.js';
 
 export const options = {
     insecureSkipTLSVerify: true,
