@@ -382,13 +382,38 @@ class InitCommand extends Command
 		php
 	}
 
-	# Canonical FrankenPHP routing: php_server serves existing static files,
-	# routes everything else through the worker entry point.
-	# REQUEST_URI is preserved (Caddy sets it from the original client request,
-	# not the post-rewrite URI) so TYPO3 can route /typo3/module/* correctly.
-	php_server {
-		index {$entryScript}
-		try_files {path} {$entryScript}
+	# Routing. `route` keeps the written order (Caddy sorts directives
+	# otherwise) and sits behind the deny and install-tool handles above.
+	route {
+		# Static assets are served by Caddy. Everything TYPO3 publishes under
+		# these prefixes is owned by the deployment or content-addressed, so
+		# clients may cache it: one month by default, one year for CSS and JS,
+		# the lifetimes of TYPO3's own .htaccess (the ?<mtime> cache buster
+		# TYPO3 appends changes the URL on edits). Sidecars a build step
+		# produced next to an asset (.zst, .br, .gz) are served as is.
+		# Directories fall through to TYPO3 like the .htaccess `-f` rule.
+		@assets {
+			path /_assets/* /_assets_install/* /fileadmin/* /typo3temp/assets/* /favicon.ico /robots.txt
+			not path */
+			file
+		}
+		handle @assets {
+			@long_lived path *.css *.js *.mjs
+			header @long_lived Cache-Control "public, max-age=31536000"
+			@month not path *.css *.js *.mjs
+			header @month Cache-Control "public, max-age=2592000"
+			file_server {
+				precompressed zstd br gzip
+			}
+		}
+
+		# Everything else is PHP. Rewriting straight to the entry script means
+		# a page request never stats the filesystem; a missing asset under the
+		# prefixes above also ends here and gets TYPO3's 404 page. REQUEST_URI
+		# keeps the original client path, so TYPO3 routes /typo3/module/* as
+		# usual, and the query string survives the rewrite.
+		rewrite * {$entryScript}
+		php
 	}
 CADDY;
 

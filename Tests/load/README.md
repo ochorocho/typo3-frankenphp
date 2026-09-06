@@ -190,12 +190,10 @@ backend swapped:
    npm run load:frontend     # measure A
    ```
 
-2. **Per-request mode** — temporarily edit `Build/Caddyfile`:
+2. **Per-request mode** — temporarily edit `Build/Caddyfile`, at the end of the `route` block:
    ```caddyfile
-   php_server {
-       index /index.php          # was /worker.php
-       try_files {path} /index.php
-   }
+   rewrite * /index.php          # was /worker.php
+   php
    ```
    Restart frankenphp, then:
    ```bash

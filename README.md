@@ -28,7 +28,9 @@ preserves files that already exist (warns instead of overwriting), so a `compose
 * Worker entrypoint: `public/worker.php` — long-running FrankenPHP worker for the full backend + frontend (
   `HttpApplication`).
 * Webserver config: `Caddyfile` — routes `?__typo3_install` queries to canonical `public/index.php` (which TYPO3 ships
-  and which handles `Bootstrap::init($failsafe=true)` internally), and everything else through the worker.
+  and which handles `Bootstrap::init($failsafe=true)` internally), serves static assets (`_assets/`, `fileadmin/`,
+  `typo3temp/assets/`) directly with the cache lifetimes of TYPO3's `.htaccess` and precompressed sidecars, and
+  rewrites everything else straight to the worker without a filesystem lookup.
 * Environment config: `.env`
 * PHP runtime config: `php.ini` — profile-aware (e.g. `display_errors`, `opcache.validate_timestamps`).
 

@@ -117,6 +117,11 @@ that was 2 of 18 001 requests.
 ## What changed
 
 - **The structural reset runs after the response** (`WorkerRequestCycle`, round 4).
+- **Assets are served by Caddy, pages never stat the filesystem.** The generated Caddyfile serves
+  `_assets/`, `fileadmin/`, `typo3temp/assets/`, `favicon.ico` and `robots.txt` through `file_server`
+  with `precompressed zstd br gzip` and the cache lifetimes of TYPO3's `.htaccess` (one year for CSS
+  and JS, one month otherwise); every other request is rewritten to the worker script directly instead
+  of going through `try_files`, which stat-ed the request path first.
 - **Database connections survive requests** (`ConnectionRecycler`, closed after an open
   transaction or 60 s idle).
 - **Sandbox caches on `FileBackend`** (`scripts/setup-typo3.sh`); production equivalents are

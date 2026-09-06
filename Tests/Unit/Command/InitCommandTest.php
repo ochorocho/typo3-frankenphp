@@ -98,6 +98,26 @@ final class InitCommandTest extends TestCase
     }
 
     #[Test]
+    public function caddyfileServesAssetsFromCaddyAndRoutesEverythingElseToTheWorkerWithoutAStat(): void
+    {
+        foreach (['Production', 'Development'] as $context) {
+            $this->init($context, ['--force' => true]);
+            $caddyfile = $this->generated('Caddyfile');
+
+            self::assertStringContainsString('path /_assets/* /_assets_install/* /fileadmin/* /typo3temp/assets/* /favicon.ico /robots.txt', $caddyfile);
+            self::assertStringContainsString("not path */\n", $caddyfile, 'directories fall through to TYPO3');
+            self::assertStringContainsString('precompressed zstd br gzip', $caddyfile);
+            self::assertStringContainsString('Cache-Control "public, max-age=31536000"', $caddyfile, 'CSS and JS: one year, as TYPO3\'s .htaccess');
+            self::assertStringContainsString('Cache-Control "public, max-age=2592000"', $caddyfile, 'other assets: one month');
+            self::assertStringContainsString("\t\trewrite * /worker.php\n\t\tphp\n", $caddyfile);
+            self::assertStringNotContainsString('try_files', $caddyfile);
+            self::assertStringNotContainsString('php_server {', $caddyfile);
+            // The routing tail must stay behind the deny and install-tool handles.
+            self::assertGreaterThan(strpos($caddyfile, 'handle @typo3_install'), strpos($caddyfile, 'rewrite * /worker.php'));
+        }
+    }
+
+    #[Test]
     public function forceBacksUpAnExistingEnvFile(): void
     {
         file_put_contents($this->project . '/.env', "DB_PASSWORD=secret\n");
