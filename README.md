@@ -87,9 +87,11 @@ classification with reasons so you can see why a service is kept or discarded an
 the `frankenphp.keep` / `frankenphp.discard` service tags or a declarative `Configuration/FrankenPhpWorker.php`
 (`pin` / `keep` / `discard` / `discardPatterns`, also for services of other packages), integrators get the final
 say in `config/system/frankenphp-worker.php`. An explicit discard always wins over a keep, and the audit shows the
-origin of every override as `config:<extension key>`. In Development context every response carries two tuning
-headers: `X-FrankenPHP-Discarded` (instances dropped before the request; should stabilise after warm-up, growth means a
-leak) and `X-FrankenPHP-Reset-Us` (microseconds the reset took). Details, including measured costs:
+origin of every override as `config:<extension key>`. In Development context every response carries tuning headers:
+`X-FrankenPHP-Discarded` (instances the previous request left behind; should stabilise after warm-up, growth means a
+leak), `X-FrankenPHP-Reset-Us` (microseconds of reset inside this request), `X-FrankenPHP-Post-Reset-Us` (microseconds
+of the structural reset that ran after the previous response) and `X-FrankenPHP-Reset-Mode` (`post`, or `inline` when
+the worker fell back to resetting in front of the request). Details, including measured costs:
 [Documentation/WorkerMode.md](Documentation/WorkerMode.md).
 
 ### What a request costs

@@ -129,11 +129,25 @@ final class KeepList
      * others. Measured on the sandbox frontend: keeping these two groups
      * recovers roughly a quarter of the cost of a full flush.
      *
+     * Prefixes are the cheap form (`str_starts_with`); use a pattern only
+     * when the request-independent part is not at the start of the key.
+     *
+     * @var list<string> key prefixes
+     */
+    public const array RUNTIME_CACHE_KEEP_PREFIXES = [
+        // LanguageService: XLF labels, keyed by file and language.
+        'labels_',
+    ];
+
+    /**
+     * SchemaInformation keys are `<dbname|generic>_<hash>-tableinfo-<table>`
+     * and `<dbname|generic>_<hash>-tablenames`; the prefix is the database
+     * name, so only the suffix identifies the entry.
+     *
      * @var list<string> regular expressions matched against the entry key
      */
     public const array RUNTIME_CACHE_KEEP_PATTERNS = [
-        '/^labels_/',
-        '/^generic_[0-9a-f]+-tableinfo-cache_/',
+        '/^[A-Za-z0-9_]+-table(?:info-[A-Za-z0-9_]+|names)$/',
     ];
 
     /**

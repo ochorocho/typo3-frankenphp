@@ -58,6 +58,18 @@ final class ConnectionRecyclerTest extends TestCase
         self::assertSame(['Default' => $connection], self::pool());
     }
 
+    #[Test]
+    public function leavesThePoolUntouchedWhenNothingIsClosed(): void
+    {
+        $connection = $this->connection(connected: true, inTransaction: false, closeExpected: false);
+        $pool = ['Default' => $connection, 'Second' => $connection];
+        self::setPool($pool);
+
+        (new ConnectionRecycler(60))->recycle(5);
+
+        self::assertSame($pool, self::pool());
+    }
+
     private function connection(bool $connected, bool $inTransaction, bool $closeExpected): Connection&MockObject
     {
         $connection = $this->createMock(Connection::class);

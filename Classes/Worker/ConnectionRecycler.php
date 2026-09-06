@@ -40,7 +40,9 @@ final readonly class ConnectionRecycler
             }
             $kept[$name] = $connection;
         }
-        self::setPool($kept);
+        if ($closed > 0) {
+            self::setPool($kept);
+        }
         return $closed;
     }
 

@@ -43,24 +43,45 @@ closure instead.
 
 ### Per-request reset order
 
+The reset has two phases. The structural phase runs **after** a response has
+been handed to `frankenphp_finish_request()`, while no client waits; the
+clock-bound phase runs in front of the next request. `WorkerRequestCycle`
+drives both from `worker.php`; if the post-response phase is unavailable (no
+`frankenphp_finish_request()`, first request after boot) or fails, the next
+request runs both phases inline, so a half-reset worker never serves a request.
+
+After response N (`WorkerStateResetter::afterResponse()`):
+
 1. Native session closed, `$_SESSION` cleared, `BE_USER` / `LANG` / `TYPO3_REQUEST`
-   globals unset, `EXEC_TIME` family refreshed, `GeneralUtility` runtime caches
-   and non-DI singleton registry cleared, static Core leaks reset
-   (`FileNameFilter`, `DataHandler` cache-clear queue, `PublicUrlPrefixer` guard).
+   globals unset, `GeneralUtility` runtime caches and non-DI singleton registry
+   cleared, static Core leaks reset (`FileNameFilter`, `DataHandler`
+   cache-clear queue, `PublicUrlPrefixer` guard).
 2. A fresh `RequestId` replaces the synthetic `_early.*` service, so every
    response carries its own CSP nonce. `LogManager` is pointed at it.
 3. Every container instance outside the keep set is discarded.
 4. Pinned services with per-request state are reset: all `Context` aspects
    removed, `cache.runtime` flushed, boot state replayed into
    `AssetCollector` / `MetaTagManagerRegistry` / `MenuContentObjectFactory`.
-   Database connections are kept (`ConnectionRecycler`, before step 1):
-   reconnecting per request was the dominant cost under load. A connection is
-   closed only when the previous request died inside a transaction or after
-   `KeepList::CONNECTION_MAX_IDLE_SECONDS` of idle time. See
-   `Performance.md` for the numbers.
 5. `PageRenderer` is re-created and fed the post-boot state (assets added by
-   `ext_localconf.php` survive).
-6. `WorkerRequestStartingEvent` is dispatched for third-party resets.
+   `ext_localconf.php` survive), and the `Application` for the next request is
+   resolved so its middleware chain is built off the critical path.
+
+Nothing in this phase may read `$_SERVER` or `EXEC_TIME` as "current": both
+still describe request N. Headers can no longer be sent.
+
+Before request N+1 (`WorkerStateResetter::beforeRequest()`):
+
+1. Database connections are recycled (`ConnectionRecycler`): kept unless the
+   previous request died inside a transaction or more than
+   `KeepList::CONNECTION_MAX_IDLE_SECONDS` passed. Reconnecting per request was
+   the dominant cost under load; see `Performance.md`.
+2. The `EXEC_TIME` family is refreshed to the new request's clock.
+3. `WorkerRequestStartingEvent` is dispatched for third-party resets.
+
+In Development context the worker reports both phases: `X-FrankenPHP-Reset-Us`
+(the clock-bound phase, inside the request), `X-FrankenPHP-Post-Reset-Us` (the
+structural phase after the previous response) and `X-FrankenPHP-Reset-Mode`
+(`post`, or `inline` when the fallback ran).
 
 ### Controlling your own services
 
@@ -168,14 +189,25 @@ Measured on the dev sandbox (SQLite, 2 workers, TYPO3 14.3.4, PHP 8.5, Apple Sil
 | discard-by-default, **no** runtime cache flush (incorrect: serves stale rows) | 530 | 7.5 ms | 11 ms |
 | discard-by-default, selective flush (labels + table info kept) — **shipped** | 286 | 14.0 ms | 16 ms |
 
-The reset itself (`X-FrankenPHP-Reset-Us`) costs 0.3 ms per request; re-instantiating
-the ~50-100 discarded services is not measurable. The cost is recomputing what
+The structural reset costs about 0.15 ms per request and runs after the
+response since the post-response split (`X-FrankenPHP-Post-Reset-Us`); the part
+left inside the request (`X-FrankenPHP-Reset-Us`) is under 20 µs.
+Re-instantiating the ~50-100 discarded services is not measurable. The cost is recomputing what
 Core memoises in `cache.runtime`: page rows, rootlines, cache lifetimes, menus,
 TSconfig. PHP-FPM recomputes all of it on every request too, so this is the
 honest per-request price; the old blacklist implementation was faster only
 because it kept those rows across requests and served stale data. If a site
-needs the old numbers back, `KeepList::RUNTIME_CACHE_KEEP_PATTERNS` is the
-knob, and every pattern added there is a conscious staleness trade-off.
+needs the old numbers back, `KeepList::RUNTIME_CACHE_KEEP_PREFIXES` and
+`RUNTIME_CACHE_KEEP_PATTERNS` are the knob, and every entry added there is a
+conscious staleness trade-off. Decide from evidence, not from guessing: start
+the worker with `FRANKENPHP_RUNTIME_CACHE_INVENTORY=1` in Development context,
+send the requests you care about (the e2e suite is a good backend sample), then
+run `frankenphp:audit --runtime-cache`. It groups the recorded keys by shape,
+counts entries and requests, and says whether the current policy keeps or
+flushes each group. Keys that embed a uid, page id or user id are
+request-bound and stay flushed; keys that are a hash of their inputs
+(`pageTsConfig-hash-to-object-<hash>`, labels, table schema) can be kept
+because a changed input produces a new key.
 
 k6 load scenarios (`Tests/load`, 2 minutes each):
 

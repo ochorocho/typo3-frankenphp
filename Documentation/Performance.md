@@ -13,7 +13,7 @@ One client, before any change: 9.3 ms end to end (curl, fresh TLS handshake each
 
 | Step | Cost | Owner |
 | --- | --- | --- |
-| Worker reset (`WorkerStateResetter::reset()`) | 0.2 ms | this extension |
+| Worker reset (`WorkerStateResetter::reset()`) | 0.2 ms, since round 4 only 16 µs inside the request (the rest runs after the response) | this extension |
 | Rebuilding the discarded services (72 objects, mostly middlewares and TypoScript builders) | 0.45 ms, plus 0.9 ms for the dev-only admin panel renderer | this extension's model, Core constructors |
 | `PrepareTypoScriptFrontendRendering` | 2.8 ms with SQLite caches, 2.3 ms with file caches | Core, cache backend, `sys_template` and rootline queries |
 | `RedirectHandler` (redirect list from the pages cache) | 1.2 ms with SQLite caches, 0.13 ms with file caches | EXT:redirects, cache backend |
@@ -86,8 +86,32 @@ That is the 10 ms target with room to spare, up to the point where the load gene
 same laptop runs out of CPU. In the same session the closed-loop scenario averaged 24 ms and
 `ab -c 8` 9.8 ms, unchanged physics.
 
+## Round 4: the reset moves behind the response
+
+FrankenPHP's `frankenphp_finish_request()` hands the response to the client and lets the worker
+keep running. Since round 4 the structural part of the reset (discarding services, rotating the
+`RequestId`, flushing `cache.runtime`, re-seeding `PageRenderer`, resolving the `Application` for
+the next request) runs there, after response N; only the clock-bound part (connection recycling,
+`EXEC_TIME`, `WorkerRequestStartingEvent`) still runs in front of request N+1. Same sandbox as
+round 3 (10 threads, file caches, no admin panel), PHP 8.5.10:
+
+| | before | after |
+| --- | --- | --- |
+| `X-FrankenPHP-Reset-Us` (reset inside the request) | 241 µs | 16 µs |
+| `X-FrankenPHP-Post-Reset-Us` (reset after the previous response) | - | 155 µs |
+| single client, `curl` with TLS handshake | 5.8 ms | 5.1 ms |
+| `frontend-latency.js` at 300 req/s: avg | 4.6 ms | 3.8 ms |
+| `frontend-latency.js` at 300 req/s: median | 4.2 ms | 3.6 ms |
+| `frontend-latency.js` at 300 req/s: p95 | 6.1 ms | 4.5 ms |
+
+Throughput is unchanged by construction: the same work runs on the same thread, it just no
+longer sits between the request and its response. The first request a thread serves after boot
+or a recycle still resets inline (`X-FrankenPHP-Reset-Mode: inline`); in the 60 s run above
+that was 2 of 18 001 requests.
+
 ## What changed
 
+- **The structural reset runs after the response** (`WorkerRequestCycle`, round 4).
 - **Database connections survive requests** (`ConnectionRecycler`, closed after an open
   transaction or 60 s idle).
 - **Sandbox caches on `FileBackend`** (`scripts/setup-typo3.sh`); production equivalents are

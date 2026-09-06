@@ -34,8 +34,11 @@ use TYPO3\CMS\Frontend\Resource\PublicUrlPrefixer as FrontendPublicUrlPrefixer;
  * assumed clean: globals, native session, GeneralUtility's singleton registry
  * and the per-request RequestId are handled explicitly.
  *
- * `capture()` runs once after Bootstrap::init(); `reset()` runs at the start
- * of every request, before the application handles it.
+ * `capture()` runs once after Bootstrap::init(). The reset has two phases:
+ * `afterResponse()` does the structural work once the response has left the
+ * worker (nothing is waiting for it), `beforeRequest()` does the little that
+ * depends on the next request's clock. `reset()` runs both back to back for
+ * SAPIs without `frankenphp_finish_request()` and for the first request.
  */
 final readonly class WorkerStateResetter
 {
@@ -58,25 +61,52 @@ final readonly class WorkerStateResetter
             )();
         }
 
+        // The keep set is a compile-time parameter; build the lookup map once
+        // instead of per request.
+        $keepIds = null;
+        if ($container instanceof SymfonyContainer && $container->hasParameter(WorkerKeepListPass::PARAMETER_KEEP)) {
+            /** @var list<string> $keepList */
+            $keepList = $container->getParameter(WorkerKeepListPass::PARAMETER_KEEP);
+            $keepIds = array_fill_keys($keepList, true);
+        } elseif ($container instanceof SymfonyContainer) {
+            error_log('TYPO3 Worker: keep-list parameter missing, container instances are not discarded. Flush the DI cache.');
+        }
+
         return new WorkerStateSnapshot(
-            pageRendererState: $container->get(PageRenderer::class)->getState(),
+            pageRendererState: $container->has(PageRenderer::class) ? $container->get(PageRenderer::class)->getState() : [],
             assetCollectorState: $container->get(AssetCollector::class)->getState(),
             metaTagRegistryState: $container->get(MetaTagManagerRegistry::class)->getState(),
             menuTypeToClassMapping: $menuFactoryMapping,
+            keepIds: $keepIds,
         );
     }
 
     /**
+     * Both phases back to back, at the start of a request.
+     *
      * @return int number of service instances discarded from the container
      */
     public function reset(WorkerStateSnapshot $snapshot, ContainerInterface $container): int
     {
-        // EXEC_TIME still holds the previous request's start until resetGlobals().
-        $idleSeconds = time() - (int)($GLOBALS['EXEC_TIME'] ?? time());
-        $this->connectionRecycler->recycle($idleSeconds);
+        $discarded = $this->afterResponse($snapshot, $container);
+        $this->beforeRequest($container);
+        return $discarded;
+    }
 
+    /**
+     * Structural reset, run after the response has been flushed to the
+     * client. Nothing here may depend on the next request: `$_SERVER` and
+     * `EXEC_TIME` still describe the request that just finished, and headers
+     * can no longer be sent.
+     *
+     * @return int number of service instances discarded from the container
+     */
+    public function afterResponse(WorkerStateSnapshot $snapshot, ContainerInterface $container): int
+    {
         $this->resetProcessState();
-        $this->resetGlobals();
+        // Set per request by Core middlewares; unset so a stale value cannot
+        // leak into ServerRequestFactory::fromGlobals() or user lookups.
+        unset($GLOBALS['BE_USER'], $GLOBALS['LANG'], $GLOBALS['TYPO3_REQUEST']);
         GeneralUtility::flushInternalRuntimeCaches();
         // Non-DI singletons created through makeInstance(). Disjoint from the
         // container's instances; anything needed again is re-created lazily.
@@ -89,17 +119,51 @@ final readonly class WorkerStateResetter
         $discarded = 0;
         if ($container instanceof SymfonyContainer) {
             $this->rotateRequestId($container);
-            $discarded = $this->discardServices($container);
+            $discarded = $this->discardServices($container, $snapshot);
         }
 
         $this->resetKeptServices($container, $snapshot);
         $this->reseed($container, $snapshot);
+        return $discarded;
+    }
+
+    /**
+     * The part of the reset that needs the new request's clock. Kept as
+     * small as possible: it runs inside the client-visible latency.
+     */
+    public function beforeRequest(ContainerInterface $container): void
+    {
+        // EXEC_TIME still holds the previous request's start until refreshed.
+        $idleSeconds = time() - (int)($GLOBALS['EXEC_TIME'] ?? time());
+        $this->connectionRecycler->recycle($idleSeconds);
+        $this->refreshExecTime();
+        // Anything the post-response phase resolved through getIndpEnv() saw
+        // the previous request's $_SERVER.
+        GeneralUtility::flushInternalRuntimeCaches();
 
         if ($container->has(EventDispatcherInterface::class)) {
             $container->get(EventDispatcherInterface::class)
                 ->dispatch(new WorkerRequestStartingEvent($container));
         }
-        return $discarded;
+    }
+
+    /**
+     * Whether a cache.runtime entry survives the per-request flush.
+     * See KeepList::RUNTIME_CACHE_KEEP_PREFIXES / RUNTIME_CACHE_KEEP_PATTERNS.
+     */
+    public static function keepsRuntimeCacheEntry(string $key): bool
+    {
+        foreach (KeepList::RUNTIME_CACHE_KEEP_PREFIXES as $prefix) {
+            if (str_starts_with($key, $prefix)) {
+                return true;
+            }
+        }
+        foreach (KeepList::RUNTIME_CACHE_KEEP_PATTERNS as $pattern) {
+            if (preg_match($pattern, $key) === 1) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -131,15 +195,12 @@ final readonly class WorkerStateResetter
      * The one place this extension reaches into non-public state, and it is
      * Symfony's stable Container internals rather than TYPO3's.
      */
-    private function discardServices(SymfonyContainer $container): int
+    private function discardServices(SymfonyContainer $container, WorkerStateSnapshot $snapshot): int
     {
-        if (!$container->hasParameter(WorkerKeepListPass::PARAMETER_KEEP)) {
-            error_log('TYPO3 Worker: keep-list parameter missing, container instances are not discarded. Flush the DI cache.');
+        $keep = $snapshot->keepIds;
+        if ($keep === null) {
             return 0;
         }
-        /** @var list<string> $keepIds */
-        $keepIds = $container->getParameter(WorkerKeepListPass::PARAMETER_KEEP);
-        $keep = array_fill_keys($keepIds, true);
 
         return \Closure::bind(function (array $keep): int {
             $discarded = 0;
@@ -204,9 +265,9 @@ final readonly class WorkerStateResetter
     }
 
     /**
-     * Selective flush: every entry goes unless its key matches one of
-     * KeepList::RUNTIME_CACHE_KEEP_PATTERNS. Kept entries keep their tags.
-     * TransientMemoryBackend exposes no key enumeration, hence the bind.
+     * Selective flush: every entry goes unless keepsRuntimeCacheEntry() says
+     * otherwise. Kept entries keep their tags. TransientMemoryBackend
+     * exposes no key enumeration, hence the bind.
      */
     private function flushRuntimeCache(FrontendInterface $runtimeCache): void
     {
@@ -215,14 +276,11 @@ final readonly class WorkerStateResetter
             $runtimeCache->flush();
             return;
         }
-        $patterns = KeepList::RUNTIME_CACHE_KEEP_PATTERNS;
-        \Closure::bind(static function () use ($backend, $patterns): void {
+        \Closure::bind(static function () use ($backend): void {
             $removed = [];
             foreach ($backend->entries as $key => $_) {
-                foreach ($patterns as $pattern) {
-                    if (preg_match($pattern, $key) === 1) {
-                        continue 2;
-                    }
+                if (WorkerStateResetter::keepsRuntimeCacheEntry((string)$key)) {
+                    continue;
                 }
                 unset($backend->entries[$key]);
                 $removed[$key] = true;
@@ -284,12 +342,8 @@ final readonly class WorkerStateResetter
         $_SESSION = [];
     }
 
-    private function resetGlobals(): void
+    private function refreshExecTime(): void
     {
-        // Set per request by Core middlewares; unset so a stale value cannot
-        // leak into ServerRequestFactory::fromGlobals() or user lookups.
-        unset($GLOBALS['BE_USER'], $GLOBALS['LANG'], $GLOBALS['TYPO3_REQUEST']);
-
         // SystemEnvironmentBuilder::run() sets these once at boot. In worker
         // mode they freeze at the worker start time; refresh per request so
         // TYPO3's "now" matches reality.

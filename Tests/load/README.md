@@ -35,7 +35,7 @@ tool. For *performance* and *stability over time*, this is.
 2. **FrankenPHP serving the dev sandbox**:
 
    ```bash
-   cd ../../Build && frankenphp run -c Caddyfile -e .env
+   cd ../../Build && frankenphp run -c Caddyfile --envfile .env
    ```
 
    Default endpoints: `http://localhost:8888`, `https://localhost:8885`.
@@ -54,6 +54,7 @@ From `Tests/`:
 ```bash
 npm run load:smoke           # 30 s sanity — start here
 npm run load:frontend        # 2 min steady-state anonymous traffic
+RATE=300 npm run load:frontend:latency   # ~1 min — response time at a fixed request rate
 npm run load:stress          # 5 min ramp 0→100 VUs — finds saturation
 npm run load:spike           # 90 s 0→200→0 — burst recovery
 npm run load:soak            # 10 min sustained — memory-leak detection
@@ -260,11 +261,10 @@ load/
 │   ├── thresholds.js           default / backend / saturation / install-tool thresholds
 │   └── checks.js               okStatus, looksLikeCaminoPage, noPHPError, …
 └── scenarios/
-    ├── frontend-{smoke,load,stress,spike,soak}.js
+    ├── frontend-{smoke,latency,load,stress,spike,soak}.js
     ├── backend-{smoke,load,soak}.js
     ├── install-tool-{smoke,load}.js
     └── mixed-workload.js
 ```
 
 k6 documentation index: https://grafana.com/docs/k6/latest/
-RATE=300 npm run load:frontend:latency   # ~1 min — response time at a fixed request rate

@@ -46,7 +46,15 @@ export function setup() {
     }
 }
 
+// Development context only: the worker reports how it reset. "inline" on a
+// warm worker means the post-response phase failed and the structural reset
+// ran inside this request's latency. Passes trivially without the header.
+const resetAfterResponse = {
+    'reset ran after the previous response': (r) =>
+        r.headers['X-Frankenphp-Reset-Mode'] === undefined || r.headers['X-Frankenphp-Reset-Mode'] === 'post',
+};
+
 export default function () {
     const res = http.get(`${CONFIG.baseUrl}${randomFrontendPath()}`, REQUEST_PARAMS);
-    check(res, { ...okStatus, ...looksLikeCaminoPage, ...noPHPError, ...noDuplicateAssets });
+    check(res, { ...okStatus, ...looksLikeCaminoPage, ...noPHPError, ...noDuplicateAssets, ...resetAfterResponse });
 }
