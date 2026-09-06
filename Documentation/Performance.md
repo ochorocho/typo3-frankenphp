@@ -105,7 +105,12 @@ round 3 (10 threads, file caches, no admin panel), PHP 8.5.10:
 | `frontend-latency.js` at 300 req/s: p95 | 6.1 ms | 4.5 ms |
 
 Throughput is unchanged by construction: the same work runs on the same thread, it just no
-longer sits between the request and its response. The first request a thread serves after boot
+longer sits between the request and its response. Backend reference for the same build,
+`backend-load.js` (5 users, `/typo3/main`, Web>Layout and the record list for page 1, 10 threads):
+100 % checks, median 34 ms, p95 141 ms. Not comparable with the 2026-09-04 backend numbers: until
+today the scenario requested the list module under a route that no longer exists
+(`/module/records`, now `/module/content/records`), so one of its three requests was a cheap
+redirect to the login page. The first request a thread serves after boot
 or a recycle still resets inline (`X-FrankenPHP-Reset-Mode: inline`); in the 60 s run above
 that was 2 of 18 001 requests.
 

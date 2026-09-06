@@ -47,7 +47,7 @@ export default function () {
     check(layout, {...okStatus, ...looksLikeModule, ...noPHPError, ...noSecurityTokenError});
     sleep(1);
 
-    const list = http.get(moduleUrl(main.body, '/typo3/module/records', 'id=1'), BACKEND_REQUEST_PARAMS);
+    const list = http.get(moduleUrl(main.body, '/typo3/module/content/records', 'id=1'), BACKEND_REQUEST_PARAMS);
     check(list, {...okStatus, ...looksLikeModule, ...noPHPError, ...noSecurityTokenError});
     sleep(1);
 }
