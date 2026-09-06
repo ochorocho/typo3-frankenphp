@@ -153,6 +153,20 @@ that was 2 of 18 001 requests.
    "how fast is a page": the closed-loop average only reports how many clients share the CPU.
 6. For sub-millisecond cached pages, a static or edge cache in front of the worker.
 
+## Round 5: experiments that did not earn a config change
+
+Each candidate was run against the same sandbox at 300 req/s (`frontend-latency.js`, 60 s); the
+reference from round 4 is avg 3.8-4.0 ms, p95 4.5-4.6 ms, with run-to-run noise of about 0.2 ms.
+
+| Experiment | Result | Decision |
+| --- | --- | --- |
+| `opcache.jit=function` / `tracing`, 64 MB buffer | Not runnable: the Homebrew FrankenPHP 1.12.6 binary (PHP 8.5.9 ZTS, arm64) ships OPcache without the JIT. `opcache_get_status()` has no `jit` section and no `opcache.jit*` ini entry exists. | Nothing to enable; the prod `php.ini` comment stays. Re-test on a build that carries the JIT (Linux x86_64 packages). |
+| `opcache.preload` | Not run. A worker process compiles every class once at boot and keeps it in the shared OPcache for its lifetime; preloading would move the same compilation from boot to startup. Only the per-request `?__typo3_install` path could gain, and it is not a hot path. | Skip. |
+| `GOGC=200` | avg 4.08 ms, p95 4.87 ms; RSS 364 MB after the run. | No gain, more memory; not adopted. Documented as a knob in `.env`. |
+| `GOMAXPROCS` | Defaults to all cores, which is already what php/frankenphp#382 recommends over the PHP thread count. | Nothing to change. |
+| `encode zstd gzip` removed | avg 3.98 ms, p95 4.72 ms, 1.3 GB transferred instead of 0.3 GB. | Compression is free at this size on this machine (it runs in Go, off the PHP threads); keep it. |
+| Native MariaDB on a Unix socket instead of SQLite | Not run: no MariaDB/MySQL server is installed on this machine, and installing one changes the machine beyond this repository. | Open; the sandbox stays on SQLite until a server exists. |
+
 ## Stability
 
 FrankenPHP 1.12.6 with PHP 8.5.9 ZTS on macOS aborted four times today: once with the tracing JIT,
