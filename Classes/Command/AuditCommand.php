@@ -6,6 +6,8 @@ namespace Ochorocho\FrankenPhp\Command;
 
 use Ochorocho\FrankenPhp\DependencyInjection\ClassStateAnalyzer;
 use Ochorocho\FrankenPhp\DependencyInjection\WorkerKeepListPass;
+use Ochorocho\FrankenPhp\Worker\RuntimeCacheInventory;
+use Ochorocho\FrankenPhp\Worker\WorkerStateResetter;
 use Psr\Container\ContainerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -14,6 +16,7 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\DependencyInjection\Container;
+use TYPO3\CMS\Core\Core\Environment;
 
 #[AsCommand(
     name: 'frankenphp:audit',
@@ -38,11 +41,23 @@ final class AuditCommand extends Command
         $this->addOption('filter', null, InputOption::VALUE_REQUIRED, 'Only show services whose id or class contains this string');
         $this->addOption('category', null, InputOption::VALUE_REQUIRED, 'Only show "keep" or "discard" entries');
         $this->addOption('summary', null, InputOption::VALUE_NONE, 'Only print the summary and the top demotion causes');
+        $this->addOption(
+            'runtime-cache',
+            null,
+            InputOption::VALUE_OPTIONAL,
+            'Group the cache.runtime inventory the worker wrote with ' . RuntimeCacheInventory::ENV_FLAG . '=1 (path to the log, default var/log/' . RuntimeCacheInventory::LOG_BASENAME . ')',
+            false
+        );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
+
+        $runtimeCacheLog = $input->getOption('runtime-cache');
+        if ($runtimeCacheLog !== false) {
+            return $this->printRuntimeCacheInventory($io, is_string($runtimeCacheLog) && $runtimeCacheLog !== '' ? $runtimeCacheLog : Environment::getVarPath() . '/log/' . RuntimeCacheInventory::LOG_BASENAME);
+        }
 
         if (!$this->container instanceof Container || !$this->container->hasParameter(WorkerKeepListPass::PARAMETER_REPORT)) {
             $io->error('No worker classification found in the container. Flush the DI cache (`typo3 cache:flush`) so WorkerKeepListPass runs.');
@@ -167,6 +182,37 @@ final class AuditCommand extends Command
         }
         $io->section('Top demotion causes (dependency that pulled kept services into discard)');
         $io->table(['dependency', 'demoted services'], $rows);
+    }
+
+    /**
+     * Which cache.runtime entries requests leave behind, grouped by key
+     * shape, and whether the current KeepList already keeps them.
+     */
+    private function printRuntimeCacheInventory(SymfonyStyle $io, string $logFile): int
+    {
+        if (!is_file($logFile)) {
+            $io->error(sprintf(
+                'No inventory at %s. Start the worker with %s=1 in Development context, send the requests you want to inspect, then run this again.',
+                $logFile,
+                RuntimeCacheInventory::ENV_FLAG
+            ));
+            return Command::FAILURE;
+        }
+        $groups = RuntimeCacheInventory::summarizeFile($logFile);
+        $rows = [];
+        foreach ($groups as $shape => $group) {
+            $rows[] = [
+                $shape,
+                (string)$group['count'],
+                (string)$group['requests'],
+                (string)round($group['bytes'] / 1024, 1),
+                WorkerStateResetter::keepsRuntimeCacheEntry($group['example']) ? 'kept' : 'flushed',
+            ];
+        }
+        $io->section(sprintf('cache.runtime entries recorded in %s', $logFile));
+        $io->table(['key shape', 'entries', 'requests', 'KiB', 'per-request policy'], $rows);
+        $io->note('Keys that embed a record uid, page id or user id are request-bound and must stay flushed. Keys that are a hash of their inputs may be kept: add them to KeepList::RUNTIME_CACHE_KEEP_PREFIXES / _PATTERNS and measure.');
+        return Command::SUCCESS;
     }
 
     private function reasonGroup(string $reason): string

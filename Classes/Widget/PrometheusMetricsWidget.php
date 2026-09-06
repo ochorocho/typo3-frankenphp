@@ -32,17 +32,6 @@ final readonly class PrometheusMetricsWidget implements
     JavaScriptInterface,
     AdditionalCssInterface
 {
-    /**
-     * Curated picker enum — covers FrankenPHP, the most useful Caddy
-     * HTTP metrics, and a handful of Go runtime gauges. Add entries
-     * here (or override the SettingDefinition.enum at registration
-     * time) to surface additional metrics in the dropdown.
-     */
-    // Keep this list in sync with what FrankenPHP / Caddy / Go runtime
-    // ACTUALLY emit on the admin /metrics endpoint — adding a metric
-    // here that the endpoint doesn't expose will trigger the widget's
-    // "metric not exposed" error at runtime. To enumerate authoritative
-    // names: `curl http://localhost:2019/metrics | grep "^# TYPE"`.
     private const array METRIC_CHOICES = [
         'caddy_admin_http_requests_total' => "Counter of requests made to the Admin API's HTTP endpoints.",
         'caddy_config_last_reload_success_timestamp_seconds' => 'Timestamp of the last successful configuration reload.',
@@ -100,7 +89,7 @@ final readonly class PrometheusMetricsWidget implements
             new SettingDefinition(
                 key: 'metric',
                 type: 'string',
-                default: 'frankenphp_busy_threads',
+                default: 'caddy_admin_http_requests_total',
                 label: 'LLL:EXT:frankenphp/Resources/Private/Language/locallang_dashboard.xlf:widget.prometheusMetrics.setting.metric.label',
                 description: 'LLL:EXT:frankenphp/Resources/Private/Language/locallang_dashboard.xlf:widget.prometheusMetrics.setting.metric.description',
                 enum: self::METRIC_CHOICES,

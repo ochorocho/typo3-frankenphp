@@ -59,5 +59,4 @@ export function setup() {
 export default function () {
     const res = http.get(`${CONFIG.baseUrl}${randomFrontendPath()}`, REQUEST_PARAMS);
     check(res, { ...okStatus, ...noPHPError });
-    sleep(Math.random() * 0.5 + 0.5);  // 0.5–1 s jitter, more realistic
 }

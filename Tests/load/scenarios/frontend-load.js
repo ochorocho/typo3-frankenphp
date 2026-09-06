@@ -48,5 +48,4 @@ export function setup() {
 export default function () {
     const res = http.get(`${CONFIG.baseUrl}${randomFrontendPath()}`, REQUEST_PARAMS);
     check(res, { ...okStatus, ...looksLikeCaminoPage, ...noPHPError, ...noDuplicateAssets });
-    sleep(1);
 }
