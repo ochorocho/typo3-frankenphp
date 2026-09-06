@@ -22,6 +22,7 @@
 #   PERF_URLS=path       alternative URL file
 #   PERF_ROOT=path       TYPO3 project root (default ../../Build relative to this script)
 #   PERF_WARM_IMAGES=0   skip the image warmup (default 1, see perf-warm-images.sh)
+#   PERF_FLUSH_URL=url   flush through the server (APCu backends), see perf-flush-web.php
 #
 # The three calls per sequence are: 1 = cache miss (full render), 2 and 3 = cache hits.
 # Call 3 exists to show whether call 2 was really warm; if c2 and c3 differ a lot, some
@@ -75,9 +76,18 @@ fi
 out="$PERF_DIR/data/$label"
 rm -rf "$out"; mkdir -p "$out"
 
+# PERF_FLUSH_URL: flush through the server instead of a CLI process. Needed for APCu,
+# whose shared memory segment is per process (see perf-flush-web.php).
+flush_caches() {
+    if [ -n "${PERF_FLUSH_URL:-}" ]; then
+        curl -sk -o /dev/null --max-time 60 "${PERF_FLUSH_URL}$1"
+    else
+        php "$PERF_DIR/perf-flush.php" "$ROOT" "$1" >/dev/null 2>&1
+    fi
+}
 flush() {
     case "$mode" in
-        page)  php "$PERF_DIR/perf-flush.php" "$ROOT" pages,hash >/dev/null 2>&1 ;;
+        page)  flush_caches pages,hash ;;
         group) typo3 cache:flush --group pages >/dev/null 2>&1 ;;
         none)  : ;;
     esac
@@ -97,6 +107,7 @@ urlcount=$(awk -F'\t' '!/^#/ && NF>=6 {n++} END {print n+0}' "$urlfile")
     echo "php         $(php -r 'echo PHP_VERSION;' 2>/dev/null) (CLI); server: $server"
     echo "context     $TYPO3_CONTEXT"
     echo "warmimages  $warmimages"
+    echo "flush       ${PERF_FLUSH_URL:-cli}"
     echo "note        $note"
 } > "$out/meta.txt"
 php "$PERF_DIR/probe-caches.php" "$ROOT" > "$out/caches.txt" 2>/dev/null

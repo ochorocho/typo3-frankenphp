@@ -55,6 +55,25 @@ then revert (or `vendor/bin/typo3 frankenphp:init --force`).
 - `perfdata.py` – median / summarise / compare; `perfstats.py` – RESULTS.md.
 - `perf-warm-images.sh` – materialises processed images so cold numbers exclude image processing.
 
-Environment: `PERF_ROOT` (default `Build/`), `PERF_URLS`, `PERF_NOTE`, `PERF_WARM_IMAGES=0`.
+## APCu backends
+
+APCu is one shared-memory segment per process, so a CLI `cache:flush` (what `perf.sh` and
+`perf-leak.sh` use) empties the CLI's own segment and leaves the server's untouched. Flush
+through the server instead: copy `perf-flush-web.php` to `<root>/public/perf-flush.php`, add
+this handle to the Caddyfile in front of the `route` block
+
+```caddyfile
+@perf_flush query __perf_flush=*
+handle @perf_flush {
+    rewrite * /perf-flush.php
+    php
+}
+```
+
+and run the harness with `PERF_FLUSH_URL="https://localhost:8885/?__perf_flush="`. The script
+answers loopback clients only and runs as a per-request thread of the same FrankenPHP process.
+
+Environment: `PERF_ROOT` (default `Build/`), `PERF_URLS`, `PERF_NOTE`, `PERF_WARM_IMAGES=0`,
+`PERF_FLUSH_URL`.
 Requires `php` and `python3` on the PATH; `LC_ALL=C` is set in every script because a German
 locale writes decimal commas into the data files.

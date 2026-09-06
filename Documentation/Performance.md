@@ -239,11 +239,60 @@ binary, crash report `frankenphp-2026-09-06-163732.ips`); the worker took the sa
 today without incident. Leak check (`perf-leak.sh`, canonical, title, `lang`, CSP nonce fresh
 per request and equal to the header, bodies identical across passes): all 18 responses (6 pages, cold + two warm passes) ok in worker mode.
 
+## Round 7: MariaDB and APCu (2026-09-06, evening)
+
+The first item of the deployment list below, measured. MariaDB 12.3.3 (Homebrew, Unix socket
+`/tmp/mysql.sock`, defaults) and APCu 5.1.29-dev (built from git main for PHP 8.5, 256 MB) on the
+same machine, three sandboxes with byte-identical code and content (7 pages, 50 content elements):
+
+| | SQLite + `FileBackend` (shipped) | MariaDB + `FileBackend` | MariaDB + `ApcuBackend` |
+| --- | --- | --- | --- |
+| `/camino/` one client, keep-alive mean | **3.6 ms** | 5.9 ms | 6.2 ms |
+| `/camino/faqs` one client | **3.0 ms** | 7.9 ms | 8.7 ms |
+| 300 req/s, 6 cached pages: avg / p95 | **4.0 / 4.2 ms** | 7.1 / 8.7 ms | 9.4 / 10.9 ms |
+| `ab -k -c 8`, cached start page | 1077 req/s | **1107 req/s** | 796 req/s |
+| harness cold total (6 pages, median) | **256 ms**\* | 386 ms | 392 ms |
+| harness warm total (6 pages) | **59 ms**\* | 64 ms | 72 ms |
+| backend `/typo3/main`, one client | **19 ms** | 34 ms | 36 ms |
+| Web > Layout / record list, one client | **40 / 39 ms** | 68 / 71 ms | 72 / 90 ms |
+| `backend-load.js`, 5 users: median / p95 | 34 / 136 ms | 58 / **106 ms** | 70 / 111 ms |
+| `backend-multiuser.js`: median / p95 | **14 / 30 ms** | 17 / 43 ms | 18 / 57 ms |
+
+\* two of the six SQLite pages hit one-off spikes in this run (packing list 74 ms, FAQs 59 ms
+cold); the same pages measured 35 and 32 ms in the two earlier SQLite runs, i.e. the SQLite
+totals are pessimistic here, not optimistic. All runs on a quiet machine (load average below 4);
+a first pass taken while PhpStorm indexed the new sandboxes was discarded.
+
+What the numbers say:
+
+- **A cached page pays for its eight queries as round trips.** SQLite answers them in-process
+  from the OS page cache; MariaDB over the socket adds roughly 0.3 to 0.5 ms each, which is the
+  3 ms between 4.0 and 7.1 ms at 300 req/s, and the doubling of the cold render on the small
+  pages (the same queries, many more of them). The query count is Core's, not the worker's.
+- **MariaDB wins only where queries are heavy**: `backend-load.js` p95 136 to 106 ms. Everywhere
+  else the sandbox's data set is too small for a server database to pay for its round trips.
+  Throughput at saturation is the same (1077 vs 1107 req/s): the CPU cost per page is unchanged,
+  the round trips are latency, not work.
+- **TYPO3's `ApcuBackend` is slower than `FileBackend` on a threaded worker pool.** APCu on ZTS
+  serialises with locks across all worker threads, and the backend stores tags as extra entries
+  (TYPO3's own documentation calls it O(2n) with the number of tags), so the tagged `pages` and
+  `hash` caches turn a shared-memory read into lock contention: 796 against 1107 req/s. A first
+  APCu pass measured without the extension actually loaded (a bare `extension=apcu` resolves
+  against the compiled-in extension directory, not the `pecl` one) is not in the table.
+- Everything passed its correctness checks in all three variants: 100 % k6 checks, backend
+  modules rendered, no worker errors.
+
+Decision: the sandbox stays on SQLite with `FileBackend`. `scripts/setup-typo3.sh` now provisions
+either variant (`TYPO3_DB_DRIVER=mysqli`, `TYPO3_CACHE_BACKEND=apcu`, `BUILD_DIR=…`) so the
+comparison can be repeated on a machine with real data; the `Build-mariadb*` sandboxes from this
+run remain next to `Build/`. For a production site with a large database the first bullet still
+holds, and the second is where MariaDB or MySQL earns its place.
+
 ## What the deployment has to do
 
-1. A real database server on a Unix socket instead of SQLite, and Redis or APCu cache backends.
-   Not measurable here: MariaDB is only available through Docker Desktop's VM network on this
-   machine, and no native server is installed.
+1. A real database server on a Unix socket for sites whose queries are heavy (round 7: MariaDB
+   helped the backend load scenario only; on the small sandbox SQLite in-process is faster). Redis
+   for the hot caches; not `ApcuBackend` on a threaded worker pool (round 7).
 2. Cores. Throughput scales with cores until they are busy; latency at a given request rate follows.
 3. `TYPO3_CONTEXT=Production`, `FE.debug=0`, no `adminpanel`.
 4. Threads about two per core (`FRANKENPHP_NUM_THREADS` two above the worker count),

@@ -111,7 +111,11 @@ check_pass() {
     done 3< "$urls"
 }
 
-php "$PERF_DIR/perf-flush.php" "$ROOT" pages,hash,rootline >/dev/null 2>&1
+if [ -n "${PERF_FLUSH_URL:-}" ]; then
+    curl -sk -o /dev/null --max-time 60 "${PERF_FLUSH_URL}pages,hash,rootline"
+else
+    php "$PERF_DIR/perf-flush.php" "$ROOT" pages,hash,rootline >/dev/null 2>&1
+fi
 check_pass cold
 check_pass warm
 check_pass warm2

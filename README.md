@@ -271,6 +271,9 @@ git clone git@github.com:ochorocho/typo3-frankenphp.git
 cd typo3-frankenphp
 scripts/setup-typo3.sh                              # TYPO3 ^14.3 (default)
 TYPO3_VERSION='^13.0' scripts/setup-typo3.sh        # or any Composer constraint
+TYPO3_DB_DRIVER=mysqli scripts/setup-typo3.sh       # local MariaDB/MySQL: database typo3_frankenphp, user typo3/typo3
+TYPO3_CACHE_BACKEND=apcu scripts/setup-typo3.sh     # TYPO3 hot caches in APCu (needs the apcu extension in FrankenPHP)
+BUILD_DIR=Build-mariadb TYPO3_DB_DRIVER=mysqli scripts/setup-typo3.sh   # a second sandbox next to Build/
 TYPO3_VERSION='15.*@dev' scripts/setup-typo3.sh
 ```
 

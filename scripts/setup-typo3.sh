@@ -4,7 +4,7 @@ set -euo pipefail
 
 LOG_PREFIX="${LOG_PREFIX:-[typo3-frankenphp]}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/../Build"
+BUILD_DIR="${BUILD_DIR:-${SCRIPT_DIR}/../Build}"
 SETTINGS_FILE="${BUILD_DIR}/config/system/settings.php"
 ADDITIONAL_PHP="${BUILD_DIR}/config/system/additional.php"
 COMPOSER_JSON="${BUILD_DIR}/composer.json"
@@ -24,7 +24,30 @@ export TYPO3_E2E_EDITOR_USERNAME="${TYPO3_E2E_EDITOR_USERNAME:-editor}"
 export TYPO3_E2E_EDITOR_PASSWORD="${TYPO3_E2E_EDITOR_PASSWORD:-Password.1}"
 export TYPO3_PROJECT_NAME="${TYPO3_PROJECT_NAME:-typo3-frankenphp}"
 export TYPO3_SERVER_TYPE="${TYPO3_SERVER_TYPE:-other}"
-export TYPO3_DB_DRIVER="sqlite"
+# Database: sqlite (default, zero setup) or mysqli against a local MariaDB/MySQL.
+#   TYPO3_DB_DRIVER=mysqli scripts/setup-typo3.sh        # database typo3_frankenphp, user typo3/typo3 on localhost
+export TYPO3_DB_DRIVER="${TYPO3_DB_DRIVER:-sqlite}"
+if [ "${TYPO3_DB_DRIVER}" = "mysqli" ]; then
+    export TYPO3_DB_HOST="${TYPO3_DB_HOST:-localhost}"
+    export TYPO3_DB_PORT="${TYPO3_DB_PORT:-3306}"
+    export TYPO3_DB_DBNAME="${TYPO3_DB_DBNAME:-typo3_frankenphp}"
+    export TYPO3_DB_USERNAME="${TYPO3_DB_USERNAME:-typo3}"
+    export TYPO3_DB_PASSWORD="${TYPO3_DB_PASSWORD:-typo3}"
+fi
+# Backend for TYPO3's hot caches (pages, hash, rootline, pagesection): file (default) or
+# apcu. APCu is one shared segment per FrankenPHP process; note that a CLI cache:flush
+# cannot reach it (Tests/perf/README.md, perf-flush-web.php).
+TYPO3_CACHE_BACKEND="${TYPO3_CACHE_BACKEND:-file}"
+case "${TYPO3_CACHE_BACKEND}" in file|apcu) ;; *) echo "TYPO3_CACHE_BACKEND must be file or apcu" >&2; exit 1;; esac
+
+# Run one SQL statement against the sandbox database, whichever driver is in use.
+dbq() {
+    if [ "${TYPO3_DB_DRIVER}" = "mysqli" ]; then
+        mariadb -h "${TYPO3_DB_HOST}" -P "${TYPO3_DB_PORT}" -u "${TYPO3_DB_USERNAME}" -p"${TYPO3_DB_PASSWORD}" -N -e "$1" "${TYPO3_DB_DBNAME}"
+    else
+        sqlite3 "${SQLITE_DB}" "$1"
+    fi
+}
 
 log()  { printf '%s %s\n' "${LOG_PREFIX}" "$*"; }
 warn() { printf '%s %s\n' "${LOG_PREFIX}" "$*" >&2; }
@@ -33,7 +56,9 @@ die()  { warn "$*"; exit 1; }
 check_prerequisites() {
     local missing=()
     local cmd
-    for cmd in composer php sqlite3; do
+    local tools=(composer php)
+    [ "${TYPO3_DB_DRIVER}" = "mysqli" ] && tools+=(mariadb) || tools+=(sqlite3)
+    for cmd in "${tools[@]}"; do
         command -v "${cmd}" >/dev/null 2>&1 || missing+=("${cmd}")
     done
     if [ ${#missing[@]} -gt 0 ]; then
@@ -146,8 +171,8 @@ ensure_composer_install() {
 run_typo3_setup() {
     [ -f "${SETTINGS_FILE}" ] && return
 
-    log "Running 'typo3 setup' against the sqlite database ..."
-    rm -rf "${BUILD_DIR}"/var/sqlite/*
+    log "Running 'typo3 setup' against the ${TYPO3_DB_DRIVER} database ..."
+    [ "${TYPO3_DB_DRIVER}" = "sqlite" ] && rm -rf "${BUILD_DIR}"/var/sqlite/*
     (cd "${BUILD_DIR}" && vendor/bin/typo3 setup --force --no-interaction)
     # Cache is only cleared right after a fresh setup. Clearing it while a
     # FrankenPHP worker is already running breaks the worker — it has stale
@@ -160,29 +185,33 @@ run_typo3_setup() {
 # 1:/user_upload/. Idempotent; the storage-permission-isolation spec
 # alternates this user with the admin on the same worker.
 seed_e2e_fixtures() {
-    local db mount group
-    db=$(ls "${BUILD_DIR}"/var/sqlite/*.sqlite 2>/dev/null | head -n 1)
-    [ -n "${db}" ] || { warn "No sqlite database found, skipping e2e fixtures."; return 0; }
+    local mount group dual=""
+    if [ "${TYPO3_DB_DRIVER}" = "sqlite" ]; then
+        SQLITE_DB=$(ls "${BUILD_DIR}"/var/sqlite/*.sqlite 2>/dev/null | head -n 1)
+        [ -n "${SQLITE_DB}" ] || { warn "No sqlite database found, skipping e2e fixtures."; return 0; }
+    else
+        dual="FROM DUAL"
+    fi
 
     log "Seeding e2e fixtures (editor user with restricted file mount) ..."
-    sqlite3 "${db}" "INSERT INTO sys_filemounts (pid, title, identifier, read_only) \
-        SELECT 0, 'e2e user_upload', '1:/user_upload/', 0 \
+    dbq "INSERT INTO sys_filemounts (pid, title, identifier, read_only) \
+        SELECT 0, 'e2e user_upload', '1:/user_upload/', 0 ${dual} \
         WHERE NOT EXISTS (SELECT 1 FROM sys_filemounts WHERE title = 'e2e user_upload');"
-    mount=$(sqlite3 "${db}" "SELECT uid FROM sys_filemounts WHERE title = 'e2e user_upload';")
+    mount=$(dbq "SELECT uid FROM sys_filemounts WHERE title = 'e2e user_upload';")
     # workspace_perms=1: live workspace access, otherwise the user lands in
     # workspace -99 and every workspace AJAX call fails.
-    sqlite3 "${db}" "INSERT INTO be_groups (pid, title, file_mountpoints, file_permissions, groupMods, workspace_perms) \
-        SELECT 0, 'e2e editors', '${mount}', 'readFolder,readFile', 'media,media_management', 1 \
+    dbq "INSERT INTO be_groups (pid, title, file_mountpoints, file_permissions, groupMods, workspace_perms) \
+        SELECT 0, 'e2e editors', '${mount}', 'readFolder,readFile', 'media,media_management', 1 ${dual} \
         WHERE NOT EXISTS (SELECT 1 FROM be_groups WHERE title = 'e2e editors');"
-    group=$(sqlite3 "${db}" "SELECT uid FROM be_groups WHERE title = 'e2e editors';")
-    if [ "$(sqlite3 "${db}" "SELECT count(*) FROM be_users WHERE username = '${TYPO3_E2E_EDITOR_USERNAME}';")" = "0" ]; then
+    group=$(dbq "SELECT uid FROM be_groups WHERE title = 'e2e editors';")
+    if [ "$(dbq "SELECT count(*) FROM be_users WHERE username = '${TYPO3_E2E_EDITOR_USERNAME}';")" = "0" ]; then
         (cd "${BUILD_DIR}" && vendor/bin/typo3 backend:user:create \
             -u "${TYPO3_E2E_EDITOR_USERNAME}" -p "${TYPO3_E2E_EDITOR_PASSWORD}" \
             -e "editor@example.com" -g "${group}" --no-interaction)
     fi
     # options=3: inherit DB and file mounts from groups. workspace_id=0: the
     # create command defaults to -99, which the editor has no permission for.
-    sqlite3 "${db}" "UPDATE be_users SET usergroup = '${group}', options = 3, admin = 0, workspace_id = 0 \
+    dbq "UPDATE be_users SET usergroup = '${group}', options = 3, admin = 0, workspace_id = 0 \
         WHERE username = '${TYPO3_E2E_EDITOR_USERNAME}';"
 }
 
@@ -229,7 +258,8 @@ configure_imagemagick() {
         return
     fi
 
-    local magick_dir
+    local magick_dir CACHE_BACKEND_CLASS=FileBackend
+    [ "${TYPO3_CACHE_BACKEND}" = "apcu" ] && CACHE_BACKEND_CLASS=ApcuBackend
     magick_dir="$(dirname "${magick_bin}")/"
     log "Configuring GFX.processor_path=${magick_dir} + localhost login-rate-limit exclusion"
     cat > "${ADDITIONAL_PHP}" <<EOF
@@ -253,12 +283,13 @@ configure_imagemagick() {
 \$GLOBALS['TYPO3_CONF_VARS']['BE']['loginRateLimitIpExcludeList'] = '127.0.0.1, ::1';
 \$GLOBALS['TYPO3_CONF_VARS']['FE']['loginRateLimitIpExcludeList'] = '127.0.0.1, ::1';
 
-// Keep TYPO3's hot caches off SQLite. FileBackend is taggable and reads a
+// Keep TYPO3's hot caches off the database. FileBackend is taggable and reads a
 // cached page in well under a millisecond; on SQLite the same reads cost
 // ~4 ms per request and serialise concurrent workers on file locks
-// (Documentation/Performance.md). Production: Redis or APCu backends.
+// (Documentation/Performance.md). ApcuBackend (TYPO3_CACHE_BACKEND=apcu) is one
+// shared-memory segment for all worker threads of the FrankenPHP process.
 foreach (['pages', 'hash', 'rootline', 'pagesection'] as \$cache) {
-    \$GLOBALS['TYPO3_CONF_VARS']['SYS']['caching']['cacheConfigurations'][\$cache]['backend'] = \\TYPO3\\CMS\\Core\\Cache\\Backend\\FileBackend::class;
+    \$GLOBALS['TYPO3_CONF_VARS']['SYS']['caching']['cacheConfigurations'][\$cache]['backend'] = \\TYPO3\\CMS\\Core\\Cache\\Backend\\${CACHE_BACKEND_CLASS}::class;
     unset(\$GLOBALS['TYPO3_CONF_VARS']['SYS']['caching']['cacheConfigurations'][\$cache]['options']['compression']);
 }
 EOF
@@ -270,6 +301,30 @@ cleanup_processedfile() {
     (cd "${BUILD_DIR}" && vendor/bin/typo3 cleanup:localprocessedfiles --all --no-interaction)
 }
 
+# APCu needs the extension in the FrankenPHP php.ini (generated by frankenphp:init).
+configure_apcu() {
+    [ "${TYPO3_CACHE_BACKEND}" = "apcu" ] || return 0
+    local ini="${BUILD_DIR}/php.ini"
+    if [ ! -f "${ini}" ]; then
+        # frankenphp:init generates Caddyfile, .env, php.ini and worker.php (the Composer hook
+        # does the same on install/update; a fresh sandbox may not have run it yet).
+        (cd "${BUILD_DIR}" && vendor/bin/typo3 frankenphp:init --no-interaction >/dev/null)
+    fi
+    [ -f "${ini}" ] || { warn "No ${ini}; add extension=<path>/apcu.so and apc.enable_cli=1 after frankenphp:init."; return 0; }
+    grep -q "apcu.so" "${ini}" && return 0
+    # FrankenPHP resolves a bare `extension=apcu` against its compiled-in extension
+    # directory, not the one the global php.ini declares; write the absolute path.
+    local so
+    so="$(php -r 'echo ini_get("extension_dir");' 2>/dev/null)/apcu.so"
+    if [ ! -f "${so}" ]; then
+        warn "APCu extension not found at ${so}. For PHP 8.5 build it from git:"
+        warn "  git clone https://github.com/krakjoe/apcu && cd apcu && phpize && ./configure && make && cp modules/apcu.so ${so}"
+        return 0
+    fi
+    log "Enabling APCu in ${ini} (${so})"
+    printf '\n; APCu for the TYPO3 hot caches (TYPO3_CACHE_BACKEND=apcu). enable_cli lets the\n; TYPO3 CLI boot; its segment is separate from the server (see Tests/perf/README.md).\nextension=%s\napc.enabled=1\napc.enable_cli=1\napc.shm_size=256M\n' "${so}" >> "${ini}"
+}
+
 # Start setup
 mkdir -p "${BUILD_DIR}"
 check_prerequisites
@@ -278,6 +333,7 @@ ensure_composer_install
 run_typo3_setup
 seed_e2e_fixtures
 configure_imagemagick
+configure_apcu
 cleanup_processedfile
 
 log "TYPO3 is ready."

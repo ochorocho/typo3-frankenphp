@@ -8,3 +8,4 @@
 .phpunit.result.cache
 /Tests/perf/data/
 /Tests/perf/RESULTS.md
+/Build-*/
