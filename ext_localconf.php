@@ -13,3 +13,11 @@ if (\TYPO3\CMS\Core\Core\Environment::getContext()->isDevelopment()) {
         'after' => ['typo3/core/custom-platform-driver-middleware', 'typo3/core/custom-pdo-driver-result-middleware'],
     ];
 }
+
+// FrankenPHP worker: keep the unserialized TypoScript and TSconfig trees of the
+// `typoscript` cache in the process, validated by the cache file's mtime
+// (Classes/Cache/WorkerPhpFrontend.php). The CLI and per-request PHP keep Core's
+// frontend; the memo would not survive there anyway.
+if (PHP_SAPI === 'frankenphp') {
+    $GLOBALS['TYPO3_CONF_VARS']['SYS']['caching']['cacheConfigurations']['typoscript']['frontend'] = \Ochorocho\FrankenPhp\Cache\WorkerPhpFrontend::class;
+}

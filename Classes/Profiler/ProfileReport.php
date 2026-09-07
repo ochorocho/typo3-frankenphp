@@ -18,9 +18,9 @@ final class ProfileReport
         private readonly array $records,
     ) {}
 
-    public static function fromFile(string $path, string $uriFilter = ''): self
+    public static function fromFile(string $path, string $uriFilter = '', bool $exact = false): self
     {
-        return new self(iterator_to_array(ProfileLog::read($path, $uriFilter), false));
+        return new self(iterator_to_array(ProfileLog::read($path, $uriFilter, $exact), false));
     }
 
     /**

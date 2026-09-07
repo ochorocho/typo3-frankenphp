@@ -12,13 +12,13 @@ Approved plan: `~/.claude/plans/do-intense-research-on-stateless-waffle.md`.
 **Goal**: profiled medians for 6 frontend pages and 3 backend requests; ranked bottleneck table with decisions in Performance.md round 8; Core findings in WorkerMode.md; Documentation/Profiling.md.
 **Success Criteria**: every bottleneck row carries a measured number.
 **Tests**: none beyond the measurements.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: In-process memo for the typoscript cache
 **Goal**: `WorkerPhpFrontend` with mtime-validated memo for `cache.typoscript` under FrankenPHP.
 **Success Criteria**: TypoScript spans drop measurably at 300 req/s; e2e `typoscript`/`page-tsconfig` green; leak check ok. Gate: Stage 2 shows >= 0.2 ms.
 **Tests**: `Tests/Unit/Cache/WorkerPhpFrontendTest.php`.
-**Status**: Not Started
+**Status**: Complete (-10 % median total)
 
 ## Stage 4: Static file cache served by Caddy
 **Goal**: EXT:staticfilecache in the sandbox, `frankenphp:init --static-file-cache` Caddy block, measured.

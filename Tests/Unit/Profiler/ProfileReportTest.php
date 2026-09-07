@@ -93,7 +93,10 @@ final class ProfileReportTest extends TestCase
         file_put_contents($path, "not json\n", FILE_APPEND);
 
         self::assertSame(1, ProfileReport::fromFile($path, '/camino')->requestCount());
-        self::assertSame(2, ProfileReport::fromFile($path)->requestCount());
+        $log->append($this->record('/camino/faqs', 1_000_000, ['a' => 500_000]));
+        self::assertSame(2, ProfileReport::fromFile($path, '/camino/')->requestCount(), 'substring matches both Camino pages');
+        self::assertSame(1, ProfileReport::fromFile($path, '/camino/', exact: true)->requestCount());
+        self::assertSame(3, ProfileReport::fromFile($path)->requestCount());
         unlink($path);
     }
 }

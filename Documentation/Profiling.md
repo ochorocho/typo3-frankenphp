@@ -60,6 +60,11 @@ Marks (`pageinformation.done`, `settings.done`, `systemplate.determined`, `typos
 - The `total` in `Server-Timing` is the time from the worker's `begin()` to the moment the header
   is written, i.e. without response emission; the log line's `total_ns` runs until after the
   response was handed to `frankenphp_finish_request()`.
+- **The innermost middleware's own time includes the request handler**: the controller or page
+  renderer below the stack is not a middleware, so its time lands on whichever middleware sits last
+  (in the backend stack that is `ochorocho/frankenphp/preserve-native-session-cookies`, so its 18 ms
+  on `/typo3/main` is the backend controller, not the cookie fix).
+- `--uri` matches a substring; `/camino/` matches every Camino page. Use `--exact` for one page.
 - Own time of `prepare-tsfe-rendering` minus `Create PageInformation` minus the settings span is
   the page cache read and TypoScript setup work; the report does not invent a span for it.
 - A middleware whose own time is dominated by `db ms` is waiting on the database; one with a large

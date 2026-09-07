@@ -1,4 +1,5 @@
 <?php
+
 /**
  * HTTP flush endpoint for caches a CLI process cannot reach.
  *

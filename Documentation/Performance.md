@@ -288,6 +288,90 @@ comparison can be repeated on a machine with real data; the `Build-mariadb*` san
 run remain next to `Build/`. For a production site with a large database the first bullet still
 holds, and the second is where MariaDB or MySQL earns its place.
 
+## Round 8: where the milliseconds go (2026-09-07)
+
+Measured with the request profiler (`Documentation/Profiling.md`, `FRANKENPHP_PROFILE=1`): per
+middleware own time, Core's TimeTracker spans, spans between Core events, and every query. 24 warm
+requests per URL after 3 warm-ups, medians; SQLite sandbox, 10 workers, load average 3 to 7 on a
+machine shared with the user's IDE, so absolute values are 10 to 30 % above the quiet-machine gate
+numbers and the *shares* are the result.
+
+### Cached frontend page (`/camino/imprint`, median total 8.4 ms with the profiler on)
+
+| span | own ms | share | queries | what it is |
+| --- | --- | --- | --- | --- |
+| `prepare-tsfe-rendering` (middleware) | 5.30 | 63 % | 9 | of which: |
+| `Create PageInformation` (TimeTracker) | 4.66 | 55 % | 9 | `PageInformationFactory::create()` |
+| PageInformation: language, content_from_pid, **backend layout**, access | 4.11 | 49 % | 0 | see below |
+| `page-resolver` (middleware) | 0.51 | 6 % | 1 | slug routing |
+| page cache read + `createSetupConfigOrFullSetup` | 0.32 | 4 % | 0 | 1 `require`+`unserialize` (page cache) + 1 `require`+`unserialize` (setup-config) |
+| `response-propagation` (middleware, 2 calls) | 0.28 | 3 % | 0 | |
+| `site` (middleware) | 0.26 | 3 % | 0 | site matching, `setlocale()` |
+| PageInformation: page record + rootline | 0.24 | 3 % | 2 | `pages` query, `cache_rootline` read |
+| `createSettingsAndSetupConditions` | 0.23 | 3 % | 0 | 2 `require`+`unserialize` (settings) |
+| `redirecthandler` (middleware) | 0.21 | 3 % | 0 | redirect list from the file cache |
+| PageInformation: sys_template rows | 0.21 | 3 % | 1 | the one uncached query |
+| `authentication` (middleware) | 0.08 | 1 % | 0 | |
+| worker reset before the request | 0.03 | 0.3 % | | |
+| rest (dispatcher, `Application` construction, response emit) | 0.85 | 10 % | | |
+
+Database time in total: 0.13 ms for 10 queries. **The page is CPU-bound, and half of it is one
+call.** Temporary marks inside Core (removed afterwards) split the 4.1 ms of "language,
+content_from_pid, backend layout, access": `settingLanguage()` 3 µs, `setContentFromPid()` 1 µs,
+`checkBackendUserAccess()` 1 µs, **`setPageLayout()` everything else**. Inside it,
+`PageTsConfigFactory::create()` builds the complete page TSconfig on every request to resolve the
+backend layout: rootline and data-provider preparation ~0.9 ms, include tree from the `typoscript`
+cache (15 files, 358 KB, `require` + `unserialize`) ~1.4 ms, condition matching + AST build ~1.3 ms,
+`toArray()` and layout resolution ~1.0 ms (noisy run; a quiet run put the whole block at 1.9 ms).
+No database is involved. The same work runs under PHP-FPM on every request; only the worker makes
+it visible as the largest remaining item.
+
+### Backend
+
+| request | median total | largest own spans | queries |
+| --- | --- | --- | --- |
+| `/typo3/login` | 3.7 ms | `response-propagation` 1.4 ms (290 KB body, 2 calls), `authentication` 0.8 ms, `csp-headers` 0.4 ms | 5 |
+| `/typo3/main` (shell) | 21.7 ms | controller 17.7 ms\*, `response-propagation` 1.4 ms, `authentication` 0.8 ms, `csp-headers` 0.4 ms | 12 (0.4 ms) |
+| Web > Layout, page 1 | 43.6 ms | controller 36.2 ms\*, `page-context` 2.9 ms, `response-propagation` 1.3 ms | **119 (1.6 ms)** |
+| Record list, page 1 | 46.9 ms | controller 39.2 ms\*, `page-context` 3.0 ms, `response-propagation` 1.3 ms | **160 (1.8 ms)** |
+
+\* the innermost middleware's own time is the request handler, i.e. the module controller.
+The backend is CPU in the controllers (module rendering, Fluid, labels) plus a query count that
+SQLite hides: 119 to 160 queries at 10 µs each are 1.6 ms here, and 30 to 50 ms over a MariaDB
+socket (round 7 measured exactly that penalty on the same pages).
+
+### Ranked bottlenecks and what to do about them
+
+| # | bottleneck | measured | solution | who |
+| --- | --- | --- | --- | --- |
+| 1 | page TSconfig built per frontend request for the backend layout | ~2 ms of a 4 ms page (49 %) | Core: cache the compiled `PageTsConfig` (AST + array) in the `typoscript` or `hash` cache keyed by include-tree hash + condition verdicts, the way `FrontendTypoScriptFactory` caches setup; or resolve the layout without the full TSconfig. Extension: the mtime-validated memo below removes the `unserialize` share | upstream + extension (Stage 3) |
+| 2 | Core middleware pipeline for a cached page | 22 middlewares, 3.9 ms | serve cached anonymous pages as static files from Caddy (EXT:staticfilecache) | deployment (Stage 4) |
+| 3 | `unserialize()` of identical `typoscript` cache entries per request | 4 frontend entries ~0.5 ms, page TSconfig tree ~1.4 ms of loading | `WorkerPhpFrontend` memo (shipped, see below): median total 4.05 → 3.66 ms, page-TSconfig block 1.76 → 1.20 ms, A/B back to back | extension (Stage 3) |
+| 4 | `response-propagation` runs twice (core + application stack) | 0.28 ms frontend, 1.4 ms backend | Core: propagate once, or stream large bodies | upstream |
+| 5 | `sys_template` query on cache hits | 0.21 ms, 1 query | Core TODO: join into the rootline CTE | upstream |
+| 6 | redirects read from the pages cache per request | 0.21 ms | Core/EXT:redirects: runtime memo per request | upstream |
+| 7 | backend query counts (119-160 per module render) | 1.6-1.8 ms on SQLite, 30-50 ms on MariaDB | Core: fewer per-record lookups in `BackendLayoutRenderer`/record list; deployment: keep the database in-process or on the same host | upstream, deployment |
+| 8 | worker reset | 0.03 ms visible | done (round 4) | extension |
+
+### Stage 3 shipped: in-process memo for the `typoscript` cache
+
+`Classes/Cache/WorkerPhpFrontend` replaces Core's `PhpFrontend` for the `typoscript` cache under
+FrankenPHP (`ext_localconf.php`, `PHP_SAPI === 'frankenphp'`). Core stores TypoScript and TSconfig
+trees as `return unserialize('…')` files; OPcache keeps the compiled file, but the `unserialize()`
+ran on every request. The memo keeps the unserialized value per entry and validates it with the
+file's mtime (one stat, where the backend already paid one), so a cache flush or rewrite in any
+process is seen on the next request; entries are content-addressed, bounded to 64. A/B on the same
+machine, 40 requests each, `/camino/` exact:
+
+| | before | after |
+| --- | --- | --- |
+| median total | 4.05 ms | 3.66 ms (−10 %) |
+| PageInformation: backend layout (page TSconfig build) | 1.76 ms | 1.20 ms |
+| middleware stack own time | 3.58 ms | 3.20 ms |
+
+The remaining 1.2 ms of the page-TSconfig block is condition matching, AST building and
+`toArray()`, which only Core can cache (bottleneck 1).
+
 ## What the deployment has to do
 
 1. A real database server on a Unix socket for sites whose queries are heavy (round 7: MariaDB

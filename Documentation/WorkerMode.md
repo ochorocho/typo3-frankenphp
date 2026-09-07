@@ -310,6 +310,23 @@ because the process dies after every request.
 - `IconFactory::getIcon()` returns the cached `Icon` instance itself and
   callers mutate it (`setTitle()`, `setSize()`), so the runtime-cache entry
   carries the last caller's title even within one request.
+- `PageLayoutResolver::getLayoutForPage()` builds the complete page TSconfig
+  through `PageTsConfigFactory::create()` on every frontend request, cached or
+  not, to resolve the backend layout: include tree from the `typoscript` cache,
+  condition matching, AST build, `toArray()`. Measured with the request profiler
+  (Performance.md round 8) this is about 2 ms of a 4 ms cached page, with no
+  database time. `FrontendTypoScriptFactory` caches its setup AST in the
+  `typoscript` cache keyed by the condition verdicts; `PageTsConfigFactory` has
+  no such second-level cache, and the runtime-cache entry
+  `pageTsConfig-hash-to-object-*` that `BackendUtility::getPagesTSconfig()`
+  uses is per request only and not used on this path.
+- `SysTemplateRepository::getSysTemplateRowsByRootline()` runs its query on
+  every request including page-cache hits; Core's own TODO in that class
+  suggests joining it into the rootline CTE.
+- Backend module renders issue 108 (Web > Layout) to 160 (record list)
+  queries per request. In-process SQLite answers each in about 10 µs; a server
+  database over a socket costs 30 to 50 ms for the same page (Performance.md
+  round 7).
 
 ## Audit of TYPO3 14.3 (sandbox: core extensions + dashboard, form, workspaces, adminpanel)
 

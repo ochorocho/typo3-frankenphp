@@ -31,11 +31,11 @@ final readonly class ProfileLog
     }
 
     /**
-     * Streams the records, optionally filtered by a URI substring.
+     * Streams the records, optionally filtered by a URI substring (or the exact URI).
      *
      * @return \Generator<int, array<string, mixed>>
      */
-    public static function read(string $path, string $uriFilter = ''): \Generator
+    public static function read(string $path, string $uriFilter = '', bool $exact = false): \Generator
     {
         $handle = @fopen($path, 'r');
         if ($handle === false) {
@@ -47,7 +47,8 @@ final readonly class ProfileLog
                 if (!is_array($record) || !isset($record['frames'])) {
                     continue;
                 }
-                if ($uriFilter !== '' && !str_contains((string)($record['uri'] ?? ''), $uriFilter)) {
+                $uri = (string)($record['uri'] ?? '');
+                if ($uriFilter !== '' && ($exact ? $uri !== $uriFilter : !str_contains($uri, $uriFilter))) {
                     continue;
                 }
                 yield $record;

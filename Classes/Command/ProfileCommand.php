@@ -23,6 +23,7 @@ final class ProfileCommand extends Command
     protected function configure(): void
     {
         $this->addOption('uri', null, InputOption::VALUE_REQUIRED, 'Only requests whose URI contains this string', '');
+        $this->addOption('exact', null, InputOption::VALUE_NONE, 'Match --uri against the whole URI instead of a substring');
         $this->addOption('file', null, InputOption::VALUE_REQUIRED, 'Profile log (default var/log/' . RequestProfile::LOG_BASENAME . ')');
         $this->addOption('kind', null, InputOption::VALUE_REQUIRED, 'middleware, timetracker, service or all', 'all');
         $this->addOption('min-ms', null, InputOption::VALUE_REQUIRED, 'Hide spans below this median own time', '0.05');
@@ -42,7 +43,7 @@ final class ProfileCommand extends Command
             return Command::FAILURE;
         }
         $uri = (string)$input->getOption('uri');
-        $report = ProfileReport::fromFile($file, $uri);
+        $report = ProfileReport::fromFile($file, $uri, (bool)$input->getOption('exact'));
         if ($report->requestCount() === 0) {
             $io->warning(sprintf('No requests%s in %s.', $uri !== '' ? ' matching "' . $uri . '"' : '', $file));
             return Command::FAILURE;
