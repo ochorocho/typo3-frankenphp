@@ -380,10 +380,12 @@ cookie, no crawler or Solr indexer header, and the file
 `typo3temp/assets/tx_staticfilecache/<scheme>_<host>_<port><path>/index` exists; then Caddy serves
 it (gzip sidecar via `precompressed gzip`, `Content-Type` forced, direct access to the cache directory
 denied). Everything else, and every request with a backend or logged-in frontend user, still reaches
-TYPO3. The sandbox has `lochmueller/staticfilecache` 16.1 installed with the plain and gzip
-generators on and the PHP fallback middleware off; the first render of a page writes the files, and
-TYPO3's cache flush removes them. Expiry is not checked by Caddy: schedule the extension's
-`staticfilecache:removeExpiredPages` command.
+TYPO3. Measured with `lochmueller/staticfilecache` 16.1 installed in the sandbox (plain and gzip
+generators on, PHP fallback middleware off); the extension was removed again afterwards at the
+user's request, so the sandbox serves pages through the worker and the option stays opt-in for
+deployments that want it. The first render of a page writes the files, TYPO3's cache flush removes
+them. Expiry is not checked by Caddy: schedule the extension's `staticfilecache:removeExpiredPages`
+command.
 
 | `/camino/` | worker (round 4) | static file via Caddy |
 | --- | --- | --- |
