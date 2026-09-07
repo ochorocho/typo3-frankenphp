@@ -30,9 +30,7 @@ preserves files that already exist (warns instead of overwriting), so a `compose
 * Webserver config: `Caddyfile` — routes `?__typo3_install` queries to canonical `public/index.php` (which TYPO3 ships
   and which handles `Bootstrap::init($failsafe=true)` internally), serves static assets (`_assets/`, `fileadmin/`,
   `typo3temp/assets/`) directly with the cache lifetimes of TYPO3's `.htaccess` and precompressed sidecars, and
-  rewrites everything else straight to the worker without a filesystem lookup. With `--static-file-cache` it also
-  serves the pages EXT:staticfilecache wrote (`typo3temp/assets/tx_staticfilecache/…/index[.gz]`) for anonymous
-  GET/HEAD requests without a query string, so TYPO3 never runs for a cached page.
+  rewrites everything else straight to the worker without a filesystem lookup.
 * Environment config: `.env`
 * PHP runtime config: `php.ini` — profile-aware (e.g. `display_errors`, `opcache.validate_timestamps`).
 

@@ -105,22 +105,6 @@ final class InitCommandTest extends TestCase
     }
 
     #[Test]
-    public function staticFileCacheBlockIsGeneratedOnlyOnRequest(): void
-    {
-        $this->init('Production', ['--force' => true]);
-        self::assertStringNotContainsString('tx_staticfilecache', $this->generated('Caddyfile'));
-
-        $this->init('Production', ['--force' => true, '--static-file-cache' => true]);
-        $caddyfile = $this->generated('Caddyfile');
-        self::assertStringContainsString("\troute {\n\t\t# EXT:staticfilecache", $caddyfile, 'the block opens the route, before the asset handler');
-        self::assertStringContainsString('file /typo3temp/assets/tx_staticfilecache/{http.request.scheme}_{http.request.host}_{http.request.port}{path}/index', $caddyfile);
-        self::assertStringContainsString("\t\t\tnot header_regexp Cookie (^|;\\s*)be_typo_user=\n", $caddyfile);
-        self::assertStringContainsString("\t\t\tprecompressed gzip\n", $caddyfile);
-        self::assertStringContainsString("\t\trespond @sfc_direct 403\n", $caddyfile);
-        self::assertGreaterThan(strpos($caddyfile, 'respond @sfc_direct 403'), strpos($caddyfile, 'handle @assets'), 'assets come after the static file cache');
-    }
-
-    #[Test]
     public function caddyfileServesAssetsFromCaddyAndRoutesEverythingElseToTheWorkerWithoutAStat(): void
     {
         foreach (['Production', 'Development'] as $context) {

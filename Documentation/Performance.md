@@ -345,7 +345,7 @@ socket (round 7 measured exactly that penalty on the same pages).
 | # | bottleneck | measured | solution | who |
 | --- | --- | --- | --- | --- |
 | 1 | page TSconfig built per frontend request for the backend layout | ~2 ms of a 4 ms page (49 %) | Core: cache the compiled `PageTsConfig` (AST + array) in the `typoscript` or `hash` cache keyed by include-tree hash + condition verdicts, the way `FrontendTypoScriptFactory` caches setup; or resolve the layout without the full TSconfig. Extension: the mtime-validated memo below removes the `unserialize` share | upstream + extension (Stage 3) |
-| 2 | Core middleware pipeline for a cached page | 22 middlewares, 3.9 ms | serve cached anonymous pages as static files from Caddy (EXT:staticfilecache) | deployment (Stage 4) |
+| 2 | Core middleware pipeline for a cached page | 22 middlewares, 3.9 ms | serve cached anonymous pages as static files from the web server. Tried with EXT:staticfilecache and a Caddy `file` matcher on its cache directory: 0.38 ms avg at 300 req/s, 7106 req/s at saturation, bypass rules for query strings, backend and frontend-user cookies verified. Removed again: not wanted in this project | deployment, not shipped |
 | 3 | `unserialize()` of identical `typoscript` cache entries per request | 4 frontend entries ~0.5 ms, page TSconfig tree ~1.4 ms of loading | `WorkerPhpFrontend` memo (shipped, see below): median total 4.05 → 3.66 ms, page-TSconfig block 1.76 → 1.20 ms, A/B back to back | extension (Stage 3) |
 | 4 | `response-propagation` runs twice (core + application stack) | 0.28 ms frontend, 1.4 ms backend | Core: propagate once, or stream large bodies | upstream |
 | 5 | `sys_template` query on cache hits | 0.21 ms, 1 query | Core TODO: join into the rootline CTE | upstream |
@@ -371,33 +371,6 @@ machine, 40 requests each, `/camino/` exact:
 
 The remaining 1.2 ms of the page-TSconfig block is condition matching, AST building and
 `toArray()`, which only Core can cache (bottleneck 1).
-
-### Stage 4 shipped: EXT:staticfilecache served by Caddy
-
-`frankenphp:init --static-file-cache` adds an `@sfc` matcher and handler in front of the asset
-handler: GET or HEAD, no query string, no `be_typo_user` cookie, no `staticfilecache=typo_user_logged_in`
-cookie, no crawler or Solr indexer header, and the file
-`typo3temp/assets/tx_staticfilecache/<scheme>_<host>_<port><path>/index` exists; then Caddy serves
-it (gzip sidecar via `precompressed gzip`, `Content-Type` forced, direct access to the cache directory
-denied). Everything else, and every request with a backend or logged-in frontend user, still reaches
-TYPO3. Measured with `lochmueller/staticfilecache` 16.1 installed in the sandbox (plain and gzip
-generators on, PHP fallback middleware off); the extension was removed again afterwards at the
-user's request, so the sandbox serves pages through the worker and the option stays opt-in for
-deployments that want it. The first render of a page writes the files, TYPO3's cache flush removes
-them. Expiry is not checked by Caddy: schedule the extension's `staticfilecache:removeExpiredPages`
-command.
-
-| `/camino/` | worker (round 4) | static file via Caddy |
-| --- | --- | --- |
-| one client, keep-alive, mean | 3.6 ms | 1.0 ms (p50 below 1 ms) |
-| 300 req/s: avg / p95 | 4.0 / 4.2 ms | **0.38 / 0.69 ms**, 0 dropped, 100 % checks |
-| 1000 req/s: avg / p95 | k6 saturates the machine at 400 | k6 saturates the machine (25 040 dropped iterations); the server is not the limit |
-| `ab -k -c 8` ceiling | 1077 req/s | **7106 req/s**, p50 1 ms, p99 2 ms, 0 failed |
-
-The bypass rules were verified one by one (query string, backend cookie, frontend-user cookie,
-POST, direct cache path 403, backend and install tool untouched); the leak check and the frontend
-checks pass against the static files. The worker keeps serving everything that is not a plain
-anonymous page: logged-in users, forms, the backend, uncached plugins.
 
 ## What the deployment has to do
 
