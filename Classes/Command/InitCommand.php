@@ -49,6 +49,14 @@ class InitCommand extends Command
             . 'scrapers (Prometheus, Grafana Agent, curl) — browsers cannot reach it directly because Caddy '
             . 'admin rejects requests with no Origin header.'
         );
+        $this->addOption(
+            'static-file-cache',
+            null,
+            InputOption::VALUE_NONE,
+            'Serve EXT:staticfilecache pages from Caddy: adds a `@sfc` matcher and handler to the Caddyfile that '
+            . 'delivers typo3temp/assets/tx_staticfilecache/<scheme>_<host>_<port><path>/index (and its .gz) '
+            . 'for anonymous GET/HEAD requests without a query string, so TYPO3 never runs for a cached page.'
+        );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -61,6 +69,7 @@ class InitCommand extends Command
         }
         $isProd = $profile === self::PROFILE_PROD;
         $prometheus = (bool)$input->getOption('prometheus');
+        $staticFileCache = (bool)$input->getOption('static-file-cache');
 
         $projectPath = Environment::getProjectPath();
         $caddyFilePath = $projectPath . '/Caddyfile';
@@ -133,7 +142,7 @@ class InitCommand extends Command
         }
 
         if ($this->fileShouldBeCreated($caddyFilePath, $io, $force)) {
-            $caddyFileContent = $this->buildCaddyfile($root, $workerMode, $isProd, $prometheus, $httpPort, $httpsPort, $workerCount, $metricsPort);
+            $caddyFileContent = $this->buildCaddyfile($root, $workerMode, $isProd, $prometheus, $httpPort, $httpsPort, $workerCount, $metricsPort, $staticFileCache);
             file_put_contents($caddyFilePath, $caddyFileContent);
             $io->success('Created Caddyfile');
         }
@@ -306,8 +315,10 @@ class InitCommand extends Command
         int $httpsPort,
         ?string $workerCount,
         ?int $metricsPort,
+        bool $staticFileCache = false,
     ): string {
         $entryScript = $workerMode ? '/worker.php' : '/index.php';
+        $staticFileCacheBlock = $staticFileCache ? self::staticFileCacheBlock() : '';
         $workers = $workerCount ?? ($isProd ? '4' : '2');
         $metrics = $metricsPort ?? 2019;
 
@@ -384,7 +395,7 @@ class InitCommand extends Command
 
 	# Routing. `route` keeps the written order (Caddy sorts directives
 	# otherwise) and sits behind the deny and install-tool handles above.
-	route {
+	route {{$staticFileCacheBlock}
 		# Static assets are served by Caddy. Everything TYPO3 publishes under
 		# these prefixes is owned by the deployment or content-addressed, so
 		# clients may cache it: one month by default, one year for CSS and JS,
@@ -532,6 +543,45 @@ http://{\$SERVER_NAME:localhost}:{\$HTTP_PORT:{$httpPort}}, https://{\$SERVER_NA
 }
 
 CADDYFILE;
+    }
+
+    /**
+     * EXT:staticfilecache served by Caddy, the extension's nginx and .htaccess
+     * rules translated: GET or HEAD, no query string, no backend user and no
+     * logged-in frontend user cookie, not a crawler or Solr indexer, cache file
+     * present. The cache path is <scheme>_<host>_<port><path>/index, so the
+     * Host header must carry the port the extension saw (it stores 443/80 when
+     * implicit). Caddy does not check the entry's age; the extension's
+     * `staticfilecache:removeExpiredPages` command does, and a cache flush
+     * removes the files anyway. Direct access to the cache directory is denied
+     * like the extension's own configurations do.
+     */
+    private static function staticFileCacheBlock(): string
+    {
+        $cachePath = '/typo3temp/assets/tx_staticfilecache/{http.request.scheme}_{http.request.host}_{http.request.port}{path}/index';
+        return "\n\t\t# EXT:staticfilecache: cached anonymous pages as files, TYPO3 never runs.\n"
+            . "\t\t# Same rules as the extension's nginx/.htaccess configuration; the Host\n"
+            . "\t\t# header must include the port the extension stored (443/80 when implicit).\n"
+            . "\t\t# Expired entries: schedule `staticfilecache:removeExpiredPages`.\n"
+            . "\t\t@sfc {\n"
+            . "\t\t\tmethod GET HEAD\n"
+            . "\t\t\texpression `{http.request.uri.query} == \"\"`\n"
+            . "\t\t\tnot header_regexp Cookie (^|;\\s*)be_typo_user=\n"
+            . "\t\t\tnot header_regexp Cookie staticfilecache=typo_user_logged_in\n"
+            . "\t\t\tnot header X-T3crawler *\n"
+            . "\t\t\tnot header X-Tx-Solr-Iq *\n"
+            . "\t\t\tfile {$cachePath}\n"
+            . "\t\t}\n"
+            . "\t\thandle @sfc {\n"
+            . "\t\t\theader Content-Type \"text/html; charset=utf-8\"\n"
+            . "\t\t\theader X-SFC-Delivery caddy\n"
+            . "\t\t\trewrite * {$cachePath}\n"
+            . "\t\t\tfile_server {\n"
+            . "\t\t\t\tprecompressed gzip\n"
+            . "\t\t\t}\n"
+            . "\t\t}\n"
+            . "\t\t@sfc_direct path /typo3temp/assets/tx_staticfilecache/*\n"
+            . "\t\trespond @sfc_direct 403\n";
     }
 
     /**

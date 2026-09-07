@@ -11,7 +11,8 @@ import {test, expect} from '@playwright/test';
 const BASE_URL = (process.env.TYPO3_BASE_URL ?? 'https://localhost:8885/').replace(/\/+$/, '');
 
 test('Server-Timing lists the frontend middlewares and the query count', async ({request}) => {
-    const response = await request.get(`${BASE_URL}/camino/`);
+    // The sitemap page type carries a query string, so EXT:staticfilecache never serves it as a file.
+    const response = await request.get(`${BASE_URL}/camino/?type=1533906435`);
     expect(response.status()).toBe(200);
     const headers = response.headers();
     test.skip(headers['server-timing'] === undefined, 'start the worker with FRANKENPHP_PROFILE=1 to enable the profiler');

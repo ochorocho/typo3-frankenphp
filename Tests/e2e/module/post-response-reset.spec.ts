@@ -16,11 +16,12 @@ const BASE_URL = (process.env.TYPO3_BASE_URL ?? 'https://localhost:8885/').repla
 
 test('a warm worker resets after the response, not in front of the next request', async ({request}) => {
     // Warm every worker thread: the first request each thread serves is always inline.
+    // The backend login page always reaches PHP; a frontend page may be a static file (EXT:staticfilecache).
     for (let i = 0; i < 20; i++) {
-        await request.get(`${BASE_URL}/camino/`);
+        await request.get(`${BASE_URL}/typo3/login`);
     }
 
-    const response = await request.get(`${BASE_URL}/camino/`);
+    const response = await request.get(`${BASE_URL}/typo3/login`);
     expect(response.status()).toBe(200);
     const headers = response.headers();
     test.skip(headers['x-frankenphp-reset-mode'] === undefined, 'tuning headers are only sent in Development context');

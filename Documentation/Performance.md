@@ -372,6 +372,31 @@ machine, 40 requests each, `/camino/` exact:
 The remaining 1.2 ms of the page-TSconfig block is condition matching, AST building and
 `toArray()`, which only Core can cache (bottleneck 1).
 
+### Stage 4 shipped: EXT:staticfilecache served by Caddy
+
+`frankenphp:init --static-file-cache` adds an `@sfc` matcher and handler in front of the asset
+handler: GET or HEAD, no query string, no `be_typo_user` cookie, no `staticfilecache=typo_user_logged_in`
+cookie, no crawler or Solr indexer header, and the file
+`typo3temp/assets/tx_staticfilecache/<scheme>_<host>_<port><path>/index` exists; then Caddy serves
+it (gzip sidecar via `precompressed gzip`, `Content-Type` forced, direct access to the cache directory
+denied). Everything else, and every request with a backend or logged-in frontend user, still reaches
+TYPO3. The sandbox has `lochmueller/staticfilecache` 16.1 installed with the plain and gzip
+generators on and the PHP fallback middleware off; the first render of a page writes the files, and
+TYPO3's cache flush removes them. Expiry is not checked by Caddy: schedule the extension's
+`staticfilecache:removeExpiredPages` command.
+
+| `/camino/` | worker (round 4) | static file via Caddy |
+| --- | --- | --- |
+| one client, keep-alive, mean | 3.6 ms | 1.0 ms (p50 below 1 ms) |
+| 300 req/s: avg / p95 | 4.0 / 4.2 ms | **0.38 / 0.69 ms**, 0 dropped, 100 % checks |
+| 1000 req/s: avg / p95 | k6 saturates the machine at 400 | k6 saturates the machine (25 040 dropped iterations); the server is not the limit |
+| `ab -k -c 8` ceiling | 1077 req/s | **7106 req/s**, p50 1 ms, p99 2 ms, 0 failed |
+
+The bypass rules were verified one by one (query string, backend cookie, frontend-user cookie,
+POST, direct cache path 403, backend and install tool untouched); the leak check and the frontend
+checks pass against the static files. The worker keeps serving everything that is not a plain
+anonymous page: logged-in users, forms, the backend, uncached plugins.
+
 ## What the deployment has to do
 
 1. A real database server on a Unix socket for sites whose queries are heavy (round 7: MariaDB
