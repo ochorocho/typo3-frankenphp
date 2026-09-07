@@ -5,13 +5,22 @@ declare(strict_types=1);
 namespace Ochorocho\FrankenPhp;
 
 use Ochorocho\FrankenPhp\DependencyInjection\WorkerKeepListPass;
+use Ochorocho\FrankenPhp\Profiler\Database\ProfilingDriverMiddleware;
+use Ochorocho\FrankenPhp\Profiler\ProfileEventProbes;
+use Ochorocho\FrankenPhp\Profiler\ProfilingMiddlewareStackResolver;
+use Ochorocho\FrankenPhp\Profiler\ProfilingTimeTracker;
+use Ochorocho\FrankenPhp\Profiler\RequestProfile;
+use Ochorocho\FrankenPhp\Profiler\ServerTimingMiddleware;
 use Ochorocho\FrankenPhp\Widget\PrometheusMetricsWidget;
 use Ochorocho\FrankenPhp\Worker\WorkerConfigurationFileLocator;
 use Ochorocho\FrankenPhp\Worker\WorkerConfigurationLoader;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+use TYPO3\CMS\Core\Core\Environment;
+use TYPO3\CMS\Core\Http\MiddlewareStackResolver;
 use TYPO3\CMS\Core\Log\LogManager;
+use TYPO3\CMS\Core\TimeTracker\TimeTracker;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\CMS\Dashboard\WidgetRegistry;
 
@@ -30,6 +39,23 @@ return static function (ContainerConfigurator $container, ContainerBuilder $cont
         PassConfig::TYPE_AFTER_REMOVING,
         -1024
     );
+
+    // Request profiler (Documentation/Profiling.md): compiled into Development
+    // containers only, recording only while worker.php saw FRANKENPHP_PROFILE=1.
+    // The collector is pinned so it survives the per-request discard; the
+    // resolver decorator wraps every middleware in a TimedMiddleware; the
+    // TimeTracker class is swapped for one that records Core's own push/pull
+    // spans; the driver middleware is public because ConnectionPool
+    // instantiates it with makeInstance().
+    if (Environment::getContext()->isDevelopment()) {
+        $services = $container->services()->defaults()->autowire()->autoconfigure()->private();
+        $services->set(RequestProfile::class)->public()->tag(WorkerKeepListPass::TAG_KEEP, ['mode' => 'pinned']);
+        $services->set(ProfilingMiddlewareStackResolver::class)->decorate(MiddlewareStackResolver::class);
+        $services->set(TimeTracker::class, ProfilingTimeTracker::class)->public();
+        $services->set(ServerTimingMiddleware::class);
+        $services->set(ProfileEventProbes::class);
+        $services->set(ProfilingDriverMiddleware::class)->public();
+    }
 
     // Dashboard widget registration is conditional on cms-dashboard being
     // installed — that package is listed as `suggest` in composer.json,

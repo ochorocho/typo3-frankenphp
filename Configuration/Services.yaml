@@ -6,6 +6,8 @@ services:
 
   Ochorocho\FrankenPhp\:
     resource: '../Classes/*'
+    # The request profiler is registered in Services.php for Development only.
+    exclude: '../Classes/Profiler/*'
 
   # Worker bootstrap pulls this from the container directly, so it must be public.
   Ochorocho\FrankenPhp\Worker\WorkerStateResetter:

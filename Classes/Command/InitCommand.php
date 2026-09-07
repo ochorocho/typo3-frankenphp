@@ -604,6 +604,10 @@ MAX_MEMORY_MB=0
 # GOMEMLIMIT  set to the container's memory limit when running in one.
 #GOGC=200
 #GOMEMLIMIT=1GiB
+
+# Development only: record where each request spends its time (Server-Timing
+# header, var/log/frankenphp-profile.jsonl, `typo3 frankenphp:profile`).
+#FRANKENPHP_PROFILE=1
 ENV;
         }
 

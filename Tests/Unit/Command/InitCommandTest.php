@@ -54,6 +54,7 @@ final class InitCommandTest extends TestCase
         self::assertStringContainsString("\t\t# max_threads auto\n\t\t# max_wait_time 30s\n", $this->generated('Caddyfile'));
         self::assertStringContainsString("MAX_MEMORY_MB=0\n", $this->generated('.env'));
         self::assertStringContainsString("#GOGC=200\n", $this->generated('.env'));
+        self::assertStringContainsString("#FRANKENPHP_PROFILE=1\n", $this->generated('.env'));
         self::assertStringContainsString('{$HTTP_PORT:80}', $this->generated('Caddyfile'));
         self::assertStringContainsString('{$HTTPS_PORT:443}', $this->generated('Caddyfile'));
         self::assertStringContainsString('MAX_REQUESTS=10000', $this->generated('.env'));

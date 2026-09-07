@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Dump the resolved cache configuration of the instance at <root>. perf.sh stores the
  * table in data/<label>/caches.txt so a label records which backends it was measured
@@ -11,7 +12,7 @@ declare(strict_types=1);
 use TYPO3\CMS\Core\Core\Bootstrap;
 use TYPO3\CMS\Core\Core\SystemEnvironmentBuilder;
 
-$root = $argv[1] ?? null;
+$root = $_SERVER['argv'][1] ?? null;
 if ($root === null) {
     fwrite(STDERR, "usage: probe-caches.php <root>\n");
     exit(64);

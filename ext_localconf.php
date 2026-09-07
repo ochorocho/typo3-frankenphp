@@ -1,0 +1,15 @@
+<?php
+
+declare(strict_types=1);
+
+defined('TYPO3') or die();
+
+// Development only: the request profiler times every database query through
+// a Doctrine driver middleware (Documentation/Profiling.md). Nothing is
+// recorded unless the worker saw FRANKENPHP_PROFILE=1.
+if (\TYPO3\CMS\Core\Core\Environment::getContext()->isDevelopment()) {
+    $GLOBALS['TYPO3_CONF_VARS']['DB']['globalDriverMiddlewares']['ochorocho/frankenphp/profile'] = [
+        'target' => \Ochorocho\FrankenPhp\Profiler\Database\ProfilingDriverMiddleware::class,
+        'after' => ['typo3/core/custom-platform-driver-middleware', 'typo3/core/custom-pdo-driver-result-middleware'],
+    ];
+}

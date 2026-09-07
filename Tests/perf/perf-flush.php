@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Flush the named TYPO3 caches of the instance at <root> through its CacheManager, so the
  * flush works for any backend (the TAE original spoke to Redis directly).
@@ -16,7 +17,7 @@ use TYPO3\CMS\Core\Core\Bootstrap;
 use TYPO3\CMS\Core\Core\SystemEnvironmentBuilder;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 
-[, $root, $caches] = $argv + [null, null, null];
+[, $root, $caches] = ($_SERVER['argv'] ?? []) + [null, null, null];
 if ($root === null || $caches === null) {
     fwrite(STDERR, "usage: perf-flush.php <root> <cache,cache,...>\n");
     exit(64);
