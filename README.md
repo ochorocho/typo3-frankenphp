@@ -261,8 +261,57 @@ This repository is the **extension package**, not a TYPO3 installation. A throwa
 ### Prerequisites
 
 - PHP 8.3+, Composer, `sqlite3` on `$PATH`.
-- `frankenphp` binary on `$PATH` — see https://frankenphp.dev/docs/install/.
+- `frankenphp` binary on `$PATH` — see https://frankenphp.dev/docs/.
 - ImageMagick is optional and auto-detected by `setup-typo3.sh`. Override with `MAGICK_BIN=/abs/path/to/magick`.
+
+#### PHP extensions (Ubuntu / Debian)
+
+TYPO3 needs `intl`: without it the Filelist/Media module fails with
+`Class "Collator" not found` (`FileList::sortResources()` builds a `\Collator` for every folder listing).
+
+FrankenPHP embeds **thread-safe (ZTS)** PHP, so Ubuntu's own `php8.x-*` packages don't apply — they're
+non-thread-safe and their `.so` files won't load. Two ways to get the extensions:
+
+- **Prebuilt/static binary** (`curl https://frankenphp.dev/install.sh | sh`) — bundles PHP and most popular
+  extensions, including `intl`. Nothing to install.
+- **Deb-packaged PHP** — the `php-zts-*` packages come from the same static-php repository that provides
+  `apt install frankenphp` (see https://frankenphp.dev/docs/):
+
+```bash
+VERSION=85 # 82-85 available
+sudo curl https://pkg.henderkes.com/api/packages/${VERSION}/debian/repository.key -o /etc/apt/keyrings/static-php${VERSION}.asc
+echo "deb [signed-by=/etc/apt/keyrings/static-php${VERSION}.asc] https://pkg.henderkes.com/api/packages/${VERSION}/debian php-zts main" | sudo tee -a /etc/apt/sources.list.d/static-php${VERSION}.list
+sudo apt update
+sudo apt install frankenphp
+
+# Required for TYPO3 (sqlite sandbox):
+sudo apt install php-zts-intl php-zts-gd php-zts-zip php-zts-sqlite3 php-zts-pdo-sqlite
+
+# Optional, depending on how you run the sandbox:
+sudo apt install php-zts-mysqli php-zts-pdo-mysql   # TYPO3_DB_DRIVER=mysqli
+sudo apt install php-zts-apcu                       # TYPO3_CACHE_BACKEND=apcu
+sudo apt install php-zts-imagick                    # instead of the `magick` CLI
+```
+
+`mbstring`, `dom`, `xml`, `simplexml`, `libxml`, `sodium`, `exif`, `fileinfo`, `opcache`, `openssl`, `ctype`,
+`filter`, `iconv`, `session`, `tokenizer`, `zlib`, `curl` and `phar` are already in `php-zts-cli` (it `Provides:`
+them), and `json` / `pcre` / `date` are PHP core — none of them has a separate package. `intl` is the notable
+exception, which is why it's the one that goes missing. For anything unpackaged use
+[PIE](https://github.com/php/pie), not `pecl`: `sudo apt install pie-zts && sudo pie-zts install <vendor/ext>`.
+
+Verify what the binary actually has:
+
+```bash
+frankenphp php-cli -r 'var_dump(class_exists("Collator"));'          # expect bool(true)
+frankenphp php-cli -r 'print_r(get_loaded_extensions());'            # full list
+```
+
+`frankenphp php-cli -m` does *not* work — it treats `-m` as a filename. Use `-r` as above.
+
+The container equivalent is `docker/Dockerfile` (`install-php-extensions exif gd imagick intl mysqli opcache zip`).
+When adding APCu by hand, write the **absolute** path to `apcu.so` in `php.ini`: FrankenPHP resolves a bare
+`extension=apcu` against its compiled-in `extension_dir`, not the one the global `php.ini` declares
+(see `scripts/setup-typo3.sh` and `Documentation/Performance.md`).
 
 ### Bootstrap the dev sandbox
 
