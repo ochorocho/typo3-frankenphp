@@ -168,6 +168,8 @@ final class WorkerKeepListPass implements CompilerPassInterface
 
     /**
      * Pins the root with its whole closure, or records the first blocker as a pin conflict.
+     * The closure includes collected services (tagged iterators, locators): a pinned
+     * registry memoises them, so they must survive and pass the same checks.
      */
     private function pin(ServiceGraph $graph, Classification $result, string $root, string $reason): void
     {
@@ -182,7 +184,7 @@ final class WorkerKeepListPass implements CompilerPassInterface
                 continue;
             }
             $closure[$id] = true;
-            foreach ($graph->dependencies($id) as $dependency) {
+            foreach ([...$graph->dependencies($id), ...$graph->collected($id)] as $dependency) {
                 $conflict = $graph->blocker($dependency)
                     ?? ($result->isExplicitlyDiscarded($dependency) ? 'explicit-discard' : null);
                 if ($conflict !== null) {

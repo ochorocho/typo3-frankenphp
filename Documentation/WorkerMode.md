@@ -39,7 +39,14 @@ safe to keep. The compiled container rebuilds dropped services lazily.
 The **dependency closure** rule is what makes the model sound: a kept service
 that holds a reference to a discarded one would keep a stale instance while the
 container hands out a fresh one. Pinned services invert the rule and pin their
-closure instead.
+closure instead. A pinned closure includes services received through tagged
+iterators and locators: the registry memoises them, so the container and the
+registry hand out the same instances and their dependencies pass the same
+blocker checks (TYPO3 v15's `MetaTagManagerRegistry`, `RendererRegistry` and
+`TextExtractorRegistry` pin their managers, renderers and extractors this way).
+On v15 the `SoftReferenceParserFactory` pin is a reported conflict: EXT:form's
+parser injects the discarded `ResourceFactory`, so the factory is rebuilt per
+request.
 
 ### Per-request reset order
 

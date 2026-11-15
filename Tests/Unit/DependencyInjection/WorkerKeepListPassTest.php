@@ -64,7 +64,10 @@ final class WorkerKeepListPassTest extends TestCase
         $this->register($builder, HolderOfIterator::class, [new IteratorArgument([new Reference(MutableService::class)])]);
         $this->register($builder, PinnedDependency::class);
         $this->register($builder, PinnedRoot::class, [new Reference(PinnedDependency::class)]);
-        $this->register($builder, 'pinned.collector', [new IteratorArgument([new Reference(MutableService::class)])], HolderOfIterator::class);
+        $this->register($builder, 'collected.item', [], MutableService::class);
+        $this->register($builder, 'pinned.collector', [new IteratorArgument([new Reference('collected.item')])], HolderOfIterator::class);
+        $this->register($builder, 'collected.prototype', [], PrototypeService::class)->setShared(false);
+        $this->register($builder, 'pinned.prototype.collector', [new IteratorArgument([new Reference('collected.prototype')])], HolderOfIterator::class);
         $this->register($builder, PinConflictRoot::class, [new Reference(RequestId::class)]);
         $this->register($builder, DependsOnPinConflictRoot::class, [new Reference(PinConflictRoot::class)]);
         $this->register($builder, HolderOfInlinedMutable::class, [new Definition(MutableService::class)]);
@@ -87,7 +90,7 @@ final class WorkerKeepListPassTest extends TestCase
 
         $builder->addCompilerPass(
             new WorkerKeepListPass(
-                pinnedServices: [PinnedRoot::class, PinConflictRoot::class, 'pinned.collector', 'curated.root'],
+                pinnedServices: [PinnedRoot::class, PinConflictRoot::class, 'pinned.collector', 'pinned.prototype.collector', 'curated.root'],
                 softServices: [],
                 discardServices: [],
                 discardPatterns: [],
@@ -194,6 +197,23 @@ final class WorkerKeepListPassTest extends TestCase
     {
         self::assertContains('pinned.collector', $this->keep);
         self::assertSame('pinned (holds lazily collected instances)', $this->report['pinned.collector']['reason']);
+    }
+
+    #[Test]
+    public function pinnedCollectorPinsItsCollectedServices(): void
+    {
+        self::assertContains('collected.item', $this->keep);
+        self::assertSame('pinned-via:pinned.collector', $this->report['collected.item']['reason']);
+    }
+
+    #[Test]
+    public function pinnedCollectorOfNonSharedServiceIsReportedAsConflict(): void
+    {
+        self::assertNotContains('pinned.prototype.collector', $this->keep);
+        self::assertSame(
+            'pin-conflict:pinned.prototype.collector -> collected.prototype (non-shared)',
+            $this->report['pinned.prototype.collector']['reason']
+        );
     }
 
     #[Test]

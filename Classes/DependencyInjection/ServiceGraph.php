@@ -9,6 +9,7 @@ use Symfony\Component\DependencyInjection\Argument\RewindableGenerator;
 use Symfony\Component\DependencyInjection\Compiler\ServiceReferenceGraph;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
+use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\DependencyInjection\ServiceLocator;
 use TYPO3\CMS\Core\Core\RequestId;
 use TYPO3\CMS\Core\Log\Logger;
@@ -93,6 +94,51 @@ final class ServiceGraph
             $dependencies[$destination] = true;
         }
         return array_keys($dependencies);
+    }
+
+    /**
+     * Services a definition receives through iterators or locators. The
+     * reference graph marks these edges lazy, yet a registry that memoises
+     * the yielded instances holds them as firmly as a constructor reference.
+     *
+     * @return list<string>
+     */
+    public function collected(string $id): array
+    {
+        if (!$this->container->hasDefinition($id)) {
+            return [];
+        }
+        $collected = [];
+        $values = $this->values($this->container->getDefinition($id), false);
+        array_walk_recursive($values, function (mixed $value) use (&$collected): void {
+            if ($value instanceof ArgumentInterface) {
+                foreach ($this->references($value->getValues()) as $reference) {
+                    $collected[$this->resolveId((string)$reference)] = true;
+                }
+            }
+        });
+        return array_keys($collected);
+    }
+
+    /**
+     * @return list<Reference>
+     */
+    private function references(mixed $value): array
+    {
+        if ($value instanceof Reference) {
+            return [$value];
+        }
+        if ($value instanceof ArgumentInterface) {
+            $value = $value->getValues();
+        }
+        if (!is_array($value)) {
+            return [];
+        }
+        $references = [];
+        foreach ($value as $item) {
+            array_push($references, ...$this->references($item));
+        }
+        return $references;
     }
 
     /**
