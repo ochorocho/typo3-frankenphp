@@ -8,14 +8,31 @@ use Ochorocho\FrankenPhp\Worker\ConnectionRecycler;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\DependencyInjection\Container;
 use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\Database\ConnectionPool;
+use TYPO3\CMS\Core\Utility\GeneralUtility;
 
 final class ConnectionRecyclerTest extends TestCase
 {
+    /** TYPO3 v15 pool service, resolved by the recycler via makeInstance(); null on v14. */
+    private static ?ConnectionPool $instance = null;
+
+    protected function setUp(): void
+    {
+        if ((new \ReflectionProperty(ConnectionPool::class, 'connections'))->isStatic()) {
+            return;
+        }
+        self::$instance = new ConnectionPool();
+        $container = new Container();
+        $container->set(ConnectionPool::class, self::$instance);
+        GeneralUtility::setContainer($container);
+    }
+
     protected function tearDown(): void
     {
         self::setPool([]);
+        self::$instance = null;
     }
 
     #[Test]
@@ -84,7 +101,12 @@ final class ConnectionRecyclerTest extends TestCase
      */
     private static function pool(): array
     {
-        return \Closure::bind(static fn(): array => ConnectionPool::$connections, null, ConnectionPool::class)();
+        $target = self::$instance;
+        return \Closure::bind(
+            static fn(): array => $target === null ? ConnectionPool::$connections : $target->connections,
+            null,
+            ConnectionPool::class,
+        )();
     }
 
     /**
@@ -92,8 +114,13 @@ final class ConnectionRecyclerTest extends TestCase
      */
     private static function setPool(array $connections): void
     {
-        \Closure::bind(static function () use ($connections): void {
-            ConnectionPool::$connections = $connections;
+        $target = self::$instance;
+        \Closure::bind(static function () use ($target, $connections): void {
+            if ($target === null) {
+                ConnectionPool::$connections = $connections;
+                return;
+            }
+            $target->connections = $connections;
         }, null, ConnectionPool::class)();
     }
 }

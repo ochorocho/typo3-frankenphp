@@ -13,6 +13,11 @@ services:
   Ochorocho\FrankenPhp\Worker\WorkerStateResetter:
     public: true
 
+  # The resetter takes it from the container to snapshot and restore meta tags;
+  # TYPO3 v15 no longer makes it public (#110578).
+  TYPO3\CMS\Core\MetaTag\MetaTagManagerRegistry:
+    public: true
+
   # Backend AJAX controllers — TYPO3's route dispatcher resolves the target
   # class from the container if it's a public service; otherwise it falls
   # back to `GeneralUtility::makeInstance()` with no args, which fails the

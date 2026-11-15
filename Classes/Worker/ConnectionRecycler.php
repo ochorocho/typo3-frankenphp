@@ -6,9 +6,11 @@ namespace Ochorocho\FrankenPhp\Worker;
 
 use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\Database\ConnectionPool;
+use TYPO3\CMS\Core\Utility\GeneralUtility;
 
 /**
- * Keeps database connections across worker requests.
+ * Keeps database connections across worker requests (v14: static
+ * ConnectionPool::$connections, v15: the pinned ConnectionPool instance).
  *
  * Reconnecting per request reopens the socket (MySQL: TCP + auth) or the
  * file (SQLite: open + schema parse) and was the dominant cost under load
@@ -59,7 +61,12 @@ final readonly class ConnectionRecycler
      */
     private static function pool(): array
     {
-        return \Closure::bind(static fn(): array => ConnectionPool::$connections, null, ConnectionPool::class)();
+        $target = self::poolInstance();
+        return \Closure::bind(
+            static fn(): array => $target === null ? ConnectionPool::$connections : $target->connections,
+            null,
+            ConnectionPool::class,
+        )();
     }
 
     /**
@@ -67,8 +74,23 @@ final readonly class ConnectionRecycler
      */
     private static function setPool(array $connections): void
     {
-        \Closure::bind(static function () use ($connections): void {
-            ConnectionPool::$connections = $connections;
+        $target = self::poolInstance();
+        \Closure::bind(static function () use ($target, $connections): void {
+            if ($target === null) {
+                ConnectionPool::$connections = $connections;
+                return;
+            }
+            $target->connections = $connections;
         }, null, ConnectionPool::class)();
+    }
+
+    /**
+     * TYPO3 v14 shares connections in a static (null), v15 in the pinned pool service.
+     */
+    private static function poolInstance(): ?ConnectionPool
+    {
+        static $isStatic = null;
+        $isStatic ??= (new \ReflectionProperty(ConnectionPool::class, 'connections'))->isStatic();
+        return $isStatic ? null : GeneralUtility::makeInstance(ConnectionPool::class);
     }
 }

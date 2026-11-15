@@ -182,8 +182,11 @@ final readonly class WorkerStateResetter
         // log record. Point it at the new id and drop its logger cache.
         if ($container->has(LogManager::class)) {
             $logManager = $container->get(LogManager::class);
-            \Closure::bind(static function () use ($logManager, $requestId): void {
-                $logManager->requestId = (string)$requestId;
+            // TYPO3 v15 holds the RequestId object, v14 its string.
+            static $holdsObject = null;
+            $holdsObject ??= (string)(new \ReflectionProperty(LogManager::class, 'requestId'))->getType() === RequestId::class;
+            \Closure::bind(static function () use ($logManager, $requestId, $holdsObject): void {
+                $logManager->requestId = $holdsObject ? $requestId : (string)$requestId;
             }, null, LogManager::class)();
             $logManager->reset();
         }
@@ -317,10 +320,15 @@ final readonly class WorkerStateResetter
         // Cache-clear queue: committed by processClearCacheQueue() at the end
         // of a successful DataHandler run. Left over after an exception, the
         // next request's DataHandler flushes pages it never touched.
-        \Closure::bind(static function (): void {
-            DataHandler::$recordsToClearCacheFor = [];
-            DataHandler::$recordPidsForDeletedRecords = [];
-        }, null, DataHandler::class)();
+        // TYPO3 v15 keeps the queue per instance: nothing static to reset.
+        static $queueIsStatic = null;
+        $queueIsStatic ??= (new \ReflectionProperty(DataHandler::class, 'recordsToClearCacheFor'))->isStatic();
+        if ($queueIsStatic) {
+            \Closure::bind(static function (): void {
+                DataHandler::$recordsToClearCacheFor = [];
+                DataHandler::$recordPidsForDeletedRecords = [];
+            }, null, DataHandler::class)();
+        }
 
         // Re-entrancy guard around public URL prefixing. Sticky `true` after
         // an exception silently disables prefixing for the worker's lifetime.
