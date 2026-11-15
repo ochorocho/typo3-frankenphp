@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Ochorocho\FrankenPhp\Tests\Unit\Command;
 
+use Ochorocho\FrankenPhp\Command\FrankenPhpModules;
 use Ochorocho\FrankenPhp\Command\InitCommand;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -125,6 +126,29 @@ final class InitCommandTest extends TestCase
     }
 
     #[Test]
+    public function caddyfileOrdersOnlyModulesTheBinaryHas(): void
+    {
+        $modules = $this->fakeBinary("http.handlers.mercure\nhttp.handlers.php\n");
+        foreach (['Production', 'Development'] as $context) {
+            $this->init($context, ['--force' => true], $modules);
+            $caddyfile = $this->generated('Caddyfile');
+
+            self::assertStringContainsString("\torder mercure after encode\n", $caddyfile);
+            self::assertStringContainsString("\t# order vulcain after reverse_proxy (no http.handlers.vulcain in this frankenphp build)\n", $caddyfile);
+        }
+    }
+
+    #[Test]
+    public function caddyfileKeepsAllOrdersWhenTheBinaryCannotBeAsked(): void
+    {
+        $this->init('Development', [], new FrankenPhpModules($this->project . '/missing-frankenphp'));
+        $caddyfile = $this->generated('Caddyfile');
+
+        self::assertStringContainsString("\torder mercure after encode\n", $caddyfile);
+        self::assertStringContainsString("\torder vulcain after reverse_proxy\n", $caddyfile);
+    }
+
+    #[Test]
     public function forceBacksUpAnExistingEnvFile(): void
     {
         file_put_contents($this->project . '/.env', "DB_PASSWORD=secret\n");
@@ -140,7 +164,7 @@ final class InitCommandTest extends TestCase
     /**
      * @param array<string, string|bool> $options
      */
-    private function init(string $context, array $options = []): void
+    private function init(string $context, array $options = [], ?FrankenPhpModules $modules = null): void
     {
         Environment::initialize(
             new ApplicationContext($context),
@@ -153,13 +177,22 @@ final class InitCommandTest extends TestCase
             $this->project . '/public/index.php',
             'UNIX'
         );
-        $command = new InitCommand();
+        // A full build: the generated file must not depend on the host's frankenphp.
+        $command = new InitCommand($modules ?? $this->fakeBinary("http.handlers.mercure\nhttp.handlers.vulcain\n"));
         (new Application())->add($command);
         $tester = new CommandTester($command);
         $tester->execute($options, ['interactive' => false]);
 
         self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
         self::assertStringContainsString('--envfile .env', $tester->getDisplay());
+    }
+
+    private function fakeBinary(string $modules): FrankenPhpModules
+    {
+        $binary = $this->project . '/frankenphp';
+        file_put_contents($binary, "#!/bin/sh\nprintf '" . str_replace("\n", '\\n', $modules) . "'\n");
+        chmod($binary, 0755);
+        return new FrankenPhpModules($binary);
     }
 
     private function generated(string $file): string

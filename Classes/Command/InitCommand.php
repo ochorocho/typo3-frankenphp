@@ -24,6 +24,18 @@ class InitCommand extends Command
     private const string PROFILE_DEV = 'dev';
     private const string PROFILE_PROD = 'prod';
 
+    /** Global `order` lines, emitted only when the binary has the module. */
+    private const array MODULE_ORDERS = [
+        'http.handlers.mercure' => 'order mercure after encode',
+        'http.handlers.vulcain' => 'order vulcain after reverse_proxy',
+    ];
+
+    public function __construct(
+        private readonly FrankenPhpModules $modules = new FrankenPhpModules(),
+    ) {
+        parent::__construct();
+    }
+
     protected function configure(): void
     {
         $this->addOption(
@@ -308,6 +320,7 @@ class InitCommand extends Command
         ?int $metricsPort,
     ): string {
         $entryScript = $workerMode ? '/worker.php' : '/index.php';
+        $moduleOrders = $this->moduleOrders();
         $workers = $workerCount ?? ($isProd ? '4' : '2');
         $metrics = $metricsPort ?? 2019;
 
@@ -437,9 +450,7 @@ CADDY;
 	https_port {\$HTTPS_PORT:{$httpsPort}}
 {$adminBlock}{$workerBlock}{$metricsGlobal}
 	# https://caddyserver.com/docs/caddyfile/directives#sorting-algorithm
-	order mercure after encode
-	order vulcain after reverse_proxy
-	order php_server before file_server
+{$moduleOrders}	order php_server before file_server
 	order php before file_server
 }
 
@@ -496,9 +507,7 @@ CADDYFILE;
 	debug
 {$workerBlock}{$metricsGlobal}
 	# https://caddyserver.com/docs/caddyfile/directives#sorting-algorithm
-	order mercure after encode
-	order vulcain after reverse_proxy
-	order php_server before file_server
+{$moduleOrders}	order php_server before file_server
 	order php before file_server
 }
 
@@ -541,6 +550,22 @@ CADDYFILE;
      * commented examples: autoscaling and bounded queueing are deployment
      * decisions (a hit `max_wait_time` returns 504 instead of queueing).
      */
+    /**
+     * A binary that cannot be asked counts as having every module: the
+     * official builds ship them, and the file may be generated elsewhere.
+     */
+    private function moduleOrders(): string
+    {
+        $modules = $this->modules->names();
+        $lines = '';
+        foreach (self::MODULE_ORDERS as $module => $order) {
+            $lines .= $modules === null || in_array($module, $modules, true)
+                ? "\t{$order}\n"
+                : "\t# {$order} (no {$module} in this frankenphp build)\n";
+        }
+        return $lines;
+    }
+
     private function frankenphpBlock(string $root, string $workers): string
     {
         $numThreads = self::numThreads($workers);
