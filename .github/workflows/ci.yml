@@ -56,7 +56,9 @@ jobs:
 
   playwright:
     name: Playwright
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.60 cannot install browser dependencies on
+    # ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -149,11 +151,11 @@ jobs:
         working-directory: Tests
         # Tests/ has no package-lock.json committed yet, so `npm install`
         # rather than `npm ci`.  --with-deps asks Playwright to apt-install
-        # OS-level browser dependencies (fonts, GTK, X11 libs); webkit
-        # segfaults on ubuntu-latest without them.
+        # OS-level browser dependencies (fonts, GTK, X11 libs). Only firefox:
+        # it is the only project in playwright.config.ts.
         run: |
           npm install
-          npx playwright install --with-deps
+          npx playwright install --with-deps firefox
 
       - name: Run Playwright
         working-directory: Tests
