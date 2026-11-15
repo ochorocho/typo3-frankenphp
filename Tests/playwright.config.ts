@@ -75,6 +75,8 @@ export default defineConfig({
     {
       name: 'setup',
       testMatch: /.*\.setup\.ts/,
+      // Without a device the project defaults to chromium, which CI does not install.
+      use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'firefox',
