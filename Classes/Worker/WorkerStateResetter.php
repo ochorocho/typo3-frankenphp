@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Ochorocho\FrankenPhp\Worker;
 
+use Ochorocho\FrankenPhp\DependencyInjection\ServiceGraph;
 use Ochorocho\FrankenPhp\DependencyInjection\WorkerKeepListPass;
 use Ochorocho\FrankenPhp\Event\WorkerRequestStartingEvent;
 use Psr\Container\ContainerInterface;
@@ -137,6 +138,7 @@ final readonly class WorkerStateResetter
         $idleSeconds = time() - (int)($GLOBALS['EXEC_TIME'] ?? time());
         $this->connectionRecycler->recycle($idleSeconds);
         $this->refreshExecTime();
+        $this->rotateRequestClock($container);
         // Anything the post-response phase resolved through getIndpEnv() saw
         // the previous request's $_SERVER.
         GeneralUtility::flushInternalRuntimeCaches();
@@ -348,6 +350,20 @@ final readonly class WorkerStateResetter
             session_write_close();
         }
         $_SESSION = [];
+    }
+
+    /**
+     * TYPO3 v15's RequestClock is a synthetic `_early.*` service frozen at
+     * EXEC_TIME, so it would report the worker's boot time forever. Its
+     * holders are discarded per request (keep-list blocker `request-clock`).
+     */
+    private function rotateRequestClock(ContainerInterface $container): void
+    {
+        $clockClass = ServiceGraph::REQUEST_CLOCK_CLASS;
+        if (!$container instanceof SymfonyContainer || !class_exists($clockClass) || !$container->has(ServiceGraph::REQUEST_CLOCK_SERVICE)) {
+            return;
+        }
+        $container->set(ServiceGraph::REQUEST_CLOCK_SERVICE, $clockClass::create());
     }
 
     private function refreshExecTime(): void

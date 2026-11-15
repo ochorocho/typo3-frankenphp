@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection;
 
+use Ochorocho\FrankenPhp\DependencyInjection\ServiceGraph;
 use Ochorocho\FrankenPhp\DependencyInjection\WorkerKeepListPass;
 use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\ConfigPinRoot;
 use Ochorocho\FrankenPhp\Tests\Unit\DependencyInjection\Fixtures\CustomIdService;
@@ -56,6 +57,9 @@ final class WorkerKeepListPassTest extends TestCase
         $this->register($builder, ReadonlyPropsOnly::class, [new Reference(StatelessReadonly::class)]);
         $this->register($builder, HolderOfMutable::class, [new Reference(MutableService::class)]);
         $this->register($builder, RequestIdConsumer::class, [new Reference(RequestId::class)]);
+        // TYPO3 v15's frozen clock, mirrored as id only: the class is absent on v14.
+        $builder->register(ServiceGraph::REQUEST_CLOCK_SERVICE)->setSynthetic(true)->setPublic(true);
+        $this->register($builder, 'clock.consumer', [new Reference(ServiceGraph::REQUEST_CLOCK_SERVICE)], StatelessReadonly::class);
         $this->register($builder, PrototypeService::class)->setShared(false);
         // Symfony inlines non-shared services into every consumer, so the
         // holders end up owning a private mutable object each.
@@ -190,6 +194,16 @@ final class WorkerKeepListPassTest extends TestCase
         self::assertSame('pinned', $this->report[PinnedRoot::class]['reason']);
         self::assertContains(PinnedDependency::class, $this->keep);
         self::assertSame('pinned-via:' . PinnedRoot::class, $this->report[PinnedDependency::class]['reason']);
+    }
+
+    #[Test]
+    public function serviceHoldingTheRequestClockIsDemoted(): void
+    {
+        self::assertNotContains('clock.consumer', $this->keep);
+        self::assertSame(
+            'demoted-via:' . ServiceGraph::REQUEST_CLOCK_SERVICE . ' (request-clock)',
+            $this->report['clock.consumer']['reason']
+        );
     }
 
     #[Test]

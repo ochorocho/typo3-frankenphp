@@ -22,6 +22,10 @@ final class ServiceGraph
 {
     public const string REQUEST_ID_SERVICE = '_early.' . RequestId::class;
 
+    /** TYPO3 v15: frozen at EXEC_TIME, replaced per request by WorkerStateResetter. */
+    public const string REQUEST_CLOCK_CLASS = 'TYPO3\\CMS\\Core\\Clock\\RequestClock';
+    public const string REQUEST_CLOCK_SERVICE = '_early.' . self::REQUEST_CLOCK_CLASS;
+
     /** Inlined helpers that resolve against the live container or never carry request data. */
     private const array SAFE_INLINE_CLASSES = [ServiceLocator::class, RewindableGenerator::class, Logger::class];
 
@@ -148,6 +152,9 @@ final class ServiceGraph
     {
         if ($dependency === self::REQUEST_ID_SERVICE) {
             return 'request-id';
+        }
+        if ($dependency === self::REQUEST_CLOCK_SERVICE) {
+            return 'request-clock';
         }
         if (!$this->container->hasDefinition($dependency)) {
             return null;

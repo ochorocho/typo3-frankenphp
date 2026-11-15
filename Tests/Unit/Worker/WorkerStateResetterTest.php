@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Ochorocho\FrankenPhp\Tests\Unit\Worker;
 
+use Ochorocho\FrankenPhp\DependencyInjection\ServiceGraph;
 use Ochorocho\FrankenPhp\DependencyInjection\WorkerKeepListPass;
 use Ochorocho\FrankenPhp\Tests\Unit\Worker\Fixtures\WorkerTestContainer;
 use Ochorocho\FrankenPhp\Worker\WorkerStateResetter;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Container;
 use TYPO3\CMS\Core\Cache\Backend\TaggableBackendInterface;
 use TYPO3\CMS\Core\Cache\Frontend\FrontendInterface;
@@ -132,6 +134,23 @@ final class WorkerStateResetterTest extends TestCase
         self::assertEqualsWithDelta(time(), $GLOBALS['EXEC_TIME'], 2);
         self::assertSame($GLOBALS['EXEC_TIME'] - $GLOBALS['EXEC_TIME'] % 60, $GLOBALS['ACCESS_TIME']);
         self::assertTrue($container->initialized(WorkerTestContainer::DISCARDED));
+    }
+
+    #[Test]
+    public function beforeRequestReplacesTheFrozenRequestClock(): void
+    {
+        $clockClass = ServiceGraph::REQUEST_CLOCK_CLASS;
+        if (!class_exists($clockClass)) {
+            self::markTestSkipped('RequestClock exists from TYPO3 v15 on.');
+        }
+        $container = WorkerTestContainer::create();
+        $container->set(ServiceGraph::REQUEST_CLOCK_SERVICE, new $clockClass(new \DateTimeImmutable('@1000')));
+
+        (new WorkerStateResetter())->beforeRequest($container);
+
+        $clock = $container->get(ServiceGraph::REQUEST_CLOCK_SERVICE);
+        self::assertInstanceOf(ClockInterface::class, $clock);
+        self::assertSame($GLOBALS['EXEC_TIME'], $clock->now()->getTimestamp());
     }
 
     #[Test]

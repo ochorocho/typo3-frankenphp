@@ -307,8 +307,13 @@ because the process dies after every request.
   `FormProtectionFactory` and `BackendUserAuthentication` cache session-bound
   data in it under session-independent keys.
 - `DataHandler::$recordsToClearCacheFor` and `PublicUrlPrefixer::$isProcessingUrl`
-  are static and only reset on the happy path.
+  are static and only reset on the happy path. TYPO3 v15 makes the DataHandler
+  queue per instance; `PublicUrlPrefixer` is still static.
 - `SystemEnvironmentBuilder` sets `EXEC_TIME` & co. once per process.
+- TYPO3 v15's `RequestClock` is an early synthetic service frozen at the boot
+  `EXEC_TIME`; nothing re-creates it per request. The resetter replaces it in
+  `beforeRequest()`, and the keep-list treats it like `RequestId` (blocker
+  `request-clock`).
 - `BackendUtility::getPagesTSconfig()` caches the `PageTsConfig` object in
   `cache.runtime` under a hash of site, condition verdicts and rootline
   TSconfig, but `PageTsConfigFactory::create()` also merges the current user's
