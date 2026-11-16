@@ -340,6 +340,79 @@ because the process dies after every request.
   database over a socket costs 30 to 50 ms for the same page (Performance.md
   round 7).
 
+## Problem classes in TYPO3 v15
+
+Status: 2026-11-16, checked against `typo3/cms-core` 15.0.x-dev (`Build-v15/`)
+and `frankenphp:audit` there. Each class below breaks or would break a worker
+without the extension; the last column says how the extension handles it.
+"Discarded" means the instance is dropped after every response and rebuilt on
+first use.
+
+### Leaks one user's data to the next user
+
+| Class | Problem | Handled by |
+| --- | --- | --- |
+| `Core\Resource\StorageRepository` | Caches `ResourceStorage` objects in `$storageInstances`; `StoragePermissionsAspect` writes the current user's permissions onto a storage only when it is created, so the next user gets them | Discarded (curated), with `ResourceFactory` |
+| `Backend\Module\ModuleProvider`, `ModuleRegistry`, `Backend\Routing\Router` | `filterInaccessibleSubModules()` calls `removeSubModule()` on the shared module objects; routes point at the same objects | Discarded (curated) |
+| `Backend\Toolbar\ToolbarItemsRegistry` and `*ToolbarItem` | The registry holds items collected from a tagged iterator; `ClearCacheToolbarItem` computes `$cacheActions` for the current user in its constructor | Discarded (`mutable`, `/ToolbarItem$/`) |
+| `Dashboard\WidgetRegistry`, `Core\Authentication\Mfa\MfaProviderRegistry`, `Linkvalidator\Linktype\LinktypeRegistry` | Registries of collected instances that depend on the user or request | Discarded (`mutable`) |
+| `Core\Session\SessionManager`, `Core\Messaging\FlashMessageService`, `Core\Registry` | Session backends, flash message queues and loaded registry entries are request or user data | Discarded (curated) |
+| `Core\FormProtection\FormProtectionFactory` | Caches session-bound form protection objects in `cache.runtime` under session-independent keys | `cache.runtime` flushed per request |
+| `Core\Authentication\BackendUserAuthentication` | Caches the user's file mount records in `cache.runtime` | `cache.runtime` flushed per request |
+| `Backend\Utility\BackendUtility::getPagesTSconfig()` | The `pageTsConfig-hash-to-object-*` runtime-cache key leaves out the user TSconfig that `PageTsConfigFactory` merges in | `cache.runtime` flushed per request (key not on the keep list) |
+| `Core\Resource\Filter\FileNameFilter` | Static `$showHiddenFilesAndFolders`, set by privileged users | Reset in `afterResponse()` |
+| `GeneralUtility` singleton registry | 20 `SingletonInterface` classes in v15 (70 in v14) live outside the container | `resetSingletonInstances()` per request |
+
+### Frozen at worker boot
+
+| Class | Problem | Handled by |
+| --- | --- | --- |
+| `Core\Core\RequestId` | Created once in `Bootstrap::init()` as a synthetic service; the CSP nonce derives from it | New instance per request; holders demoted (blocker `request-id`); `LogManager::$requestId` rewritten |
+| `Core\Clock\RequestClock` (new in v15) | Early synthetic service frozen at the boot `EXEC_TIME`. No Core class injects it yet, but an extension following its docblock would read the boot time forever | Replaced in `beforeRequest()`; holders demoted (blocker `request-clock`) |
+| `Core\Core\SystemEnvironmentBuilder` | Sets `$GLOBALS['EXEC_TIME']`, `ACCESS_TIME`, `SIM_*` once per process; 73 Core files read them | Refreshed in `beforeRequest()` |
+| `cache.runtime` (`TransientMemoryBackend`) | Documented as per script, never flushed by Core | Flushed per request except labels and table info |
+
+### Request state in shared services
+
+| Class | Problem | Handled by |
+| --- | --- | --- |
+| `Core\Page\PageRenderer` | Collects JS, CSS, header data of the current request | Discarded, re-created and fed the boot state (`RESEED`) |
+| `Core\Page\AssetCollector`, `Core\MetaTag\MetaTagManagerRegistry` | Collect assets and meta tags of the current request | Pinned, boot state replayed per request |
+| `Core\Context\Context` | Aspects (user, workspace, date, language) of the current request | Pinned, all aspects removed per request |
+| `Frontend\ContentObject\Menu\MenuContentObjectFactory` | Menu type map can be extended at runtime | Pinned, boot map restored |
+| `Core\Security\ContentSecurityPolicy\PolicyRegistry`, `DirectiveHashCollection` | Collect policy mutations and hashes of the current response | Discarded (curated) |
+| `Core\PageTitle\PageTitleProviderManager` | `$pageTitleCache` of the current page | Discarded (curated) |
+| `Core\TimeTracker\TimeTracker` | Per-request timing stack | Discarded (curated) |
+| `Backend\Routing\UriBuilder` | `$generated` URL cache and request context | Discarded (curated) |
+| `Core\Mail\Mailer`, `Core\Mail\MemorySpool` | Sent message, queued messages | Discarded (curated) |
+| `Core\LinkHandling\LinkService` and its users (`LinkFactory`, `PageRepository`, `RedirectService`, …) | Mutable `$handlers` with link handler instances, not proven request-independent; everything holding it is demoted | Discarded (`mutable`, `demoted-via`) |
+| `Extbase\Configuration\ConfigurationManager` | Holds the request and the frontend and backend configuration caches, keyed per request and backend user in v15 | Discarded (curated) |
+| `Extbase\Persistence\Generic\PersistenceManager`, `Backend`, `Session` | Identity map, new, changed and removed objects | Discarded (curated) |
+| `Extbase\Service\CacheService`, `Extbase\Validation\ValidatorResolver` | Pending cache tags, validator conjunctions | Discarded (curated) |
+| `Form\Slot\FilePersistenceSlot`, `Form\Slot\ResourcePublicationSlot` | Allowed invocations and published file identifiers | Discarded (curated) |
+| `Adminpanel\Log\InMemoryLogWriter` | Log records of the current request | Discarded (curated) |
+| `Backend\Template\Components\DocHeaderComponent`, `ButtonBar`, `MenuRegistry` | Buttons of the current module | Non-shared in v15 (shared in v14, where they are curated discards) |
+| `*Controller` | Hold the request, view and module data | Discarded (`/Controller$/`) |
+| `Backend\Resource\PublicUrlPrefixer`, `Frontend\Resource\PublicUrlPrefixer` | Static `$isProcessingUrl`, reset only on the happy path | Reset in `afterResponse()` |
+| `Core\Imaging\IconFactory` | Returns the cached `Icon` itself and callers mutate it (`setTitle()`) | `cache.runtime` flushed per request (key not on the keep list) |
+
+### Needs care when pinned
+
+| Class | Problem | Handled by |
+| --- | --- | --- |
+| `Core\Database\ConnectionPool` | Connections are an instance property in v15 (static in v14); a connection can die idle or stay inside an open transaction | Pinned; `ConnectionRecycler` closes connections after an open transaction or 60 s idle |
+| `Core\Resource\Rendering\RendererRegistry`, `Core\Resource\TextExtraction\TextExtractorRegistry`, `MetaTagManagerRegistry` | Registries of lazily collected instances (tagged iterators in v15) | Pinned together with the services they collect |
+| `Core\DataHandling\SoftReference\SoftReferenceParserFactory` | Pinned, but EXT:form's `FormPersistenceIdentifierSoftReferenceParser` holds the discarded `ResourceFactory` | Reported as `pin-conflict` and discarded |
+
+### Fixed in v15
+
+- `DataHandler::$recordsToClearCacheFor` / `$recordPidsForDeletedRecords` are
+  per instance; the resetter only resets them where they are still static (v14).
+- `ConnectionPool::$connections` is no longer static.
+- `DocHeaderComponent`, `ButtonBar` and `MenuRegistry` are no longer shared.
+- `MetaTagManagerRegistry` dropped `SingletonInterface` (#110578), so it lives
+  in the container only.
+
 ## Audit of TYPO3 14.3 (sandbox: core extensions + dashboard, form, workspaces, adminpanel)
 
 Summary (1019 shared services):
