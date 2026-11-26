@@ -342,8 +342,9 @@ because the process dies after every request.
 
 ## Problem classes in TYPO3 v15
 
-Status: 2026-11-16, checked against `typo3/cms-core` 15.0.x-dev (`Build-v15/`)
-and `frankenphp:audit` there. Each class below breaks or would break a worker
+Status: 2026-11-26, checked against `typo3/cms-core` dev-main `c1ca5e1`
+(2026-11-26, `Build-v15/`) and `frankenphp:audit` there (1102 shared services,
+440 kept). Each class below breaks or would break a worker
 without the extension; the last column says how the extension handles it.
 "Discarded" means the instance is dropped after every response and rebuilt on
 first use.
@@ -353,9 +354,11 @@ first use.
 | Class | Problem | Handled by |
 | --- | --- | --- |
 | `Core\Resource\StorageRepository` | Caches `ResourceStorage` objects in `$storageInstances`; `StoragePermissionsAspect` writes the current user's permissions onto a storage only when it is created, so the next user gets them | Discarded (curated), with `ResourceFactory` |
-| `Backend\Module\ModuleProvider`, `ModuleRegistry`, `Backend\Routing\Router` | `filterInaccessibleSubModules()` calls `removeSubModule()` on the shared module objects; routes point at the same objects | Discarded (curated) |
+| `Backend\Module\ModuleProvider`, `ModuleRegistry`, `Backend\Routing\Router` | `filterInaccessibleSubModules()` calls `removeSubModule()` on the shared module objects; routes point at the same objects. The new v15 module access gates decide access per user, but the removal is unchanged | Discarded (curated) |
 | `Backend\Toolbar\ToolbarItemsRegistry` and `*ToolbarItem` | The registry holds items collected from a tagged iterator; `ClearCacheToolbarItem` computes `$cacheActions` for the current user in its constructor | Discarded (`mutable`, `/ToolbarItem$/`) |
 | `Dashboard\WidgetRegistry`, `Core\Authentication\Mfa\MfaProviderRegistry`, `Linkvalidator\Linktype\LinktypeRegistry` | Registries of collected instances that depend on the user or request | Discarded (`mutable`) |
+| `Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorage` (new in v15) | Holds the authenticated token of the current request for the new authentication pipeline | Discarded (`mutable`); `FrontendUserAuthenticator` demoted with it |
+| `Core\Authentication\Pipeline\LegacyUserPrincipalFactory` (new in v15) | `WeakMap` of principals per user object | Discarded (`mutable`); the backend and frontend `PasswordAuthenticator` / `SessionAuthenticator` demoted with it |
 | `Core\Session\SessionManager`, `Core\Messaging\FlashMessageService`, `Core\Registry` | Session backends, flash message queues and loaded registry entries are request or user data | Discarded (curated) |
 | `Core\FormProtection\FormProtectionFactory` | Caches session-bound form protection objects in `cache.runtime` under session-independent keys | `cache.runtime` flushed per request |
 | `Core\Authentication\BackendUserAuthentication` | Caches the user's file mount records in `cache.runtime` | `cache.runtime` flushed per request |
@@ -377,17 +380,17 @@ first use.
 | Class | Problem | Handled by |
 | --- | --- | --- |
 | `Core\Page\PageRenderer` | Collects JS, CSS, header data of the current request | Discarded, re-created and fed the boot state (`RESEED`) |
-| `Core\Page\AssetCollector`, `Core\MetaTag\MetaTagManagerRegistry` | Collect assets and meta tags of the current request | Pinned, boot state replayed per request |
+| `Core\Page\AssetCollector`, `Core\MetaTag\MetaTagManagerRegistry` and its managers, including `Seo\MetaTag\CanonicalMetaTagManager` (new in v15) | Collect assets and meta tags of the current request; the canonical manager holds the page's canonical URL | Pinned, boot state replayed per request (the managers' `getState()` / `updateState()` cover `$url`) |
 | `Core\Context\Context` | Aspects (user, workspace, date, language) of the current request | Pinned, all aspects removed per request |
 | `Frontend\ContentObject\Menu\MenuContentObjectFactory` | Menu type map can be extended at runtime | Pinned, boot map restored |
 | `Core\Security\ContentSecurityPolicy\PolicyRegistry`, `DirectiveHashCollection` | Collect policy mutations and hashes of the current response | Discarded (curated) |
 | `Core\PageTitle\PageTitleProviderManager` | `$pageTitleCache` of the current page | Discarded (curated) |
 | `Core\TimeTracker\TimeTracker` | Per-request timing stack | Discarded (curated) |
 | `Backend\Routing\UriBuilder` | `$generated` URL cache and request context | Discarded (curated) |
-| `Core\Mail\Mailer`, `Core\Mail\MemorySpool` | Sent message, queued messages | Discarded (curated) |
+| `Core\Mail\Mailer`, `Core\Mail\MemorySpool`, `Core\Mail\MailerFactory` (new in v15) | Sent message, queued messages; the factory caches one mailer per mail profile | Discarded (curated; the factory `mutable`) |
 | `Core\LinkHandling\LinkService` and its users (`LinkFactory`, `PageRepository`, `RedirectService`, …) | Mutable `$handlers` with link handler instances, not proven request-independent; everything holding it is demoted | Discarded (`mutable`, `demoted-via`) |
 | `Extbase\Configuration\ConfigurationManager` | Holds the request and the frontend and backend configuration caches, keyed per request and backend user in v15 | Discarded (curated) |
-| `Extbase\Persistence\Generic\PersistenceManager`, `Backend`, `Session` | Identity map, new, changed and removed objects | Discarded (curated) |
+| `Extbase\Persistence\Generic\PersistenceManager`, `Backend`, `Session`, `CleanStateTracker` (new in v15) | Identity map, new, changed and removed objects, original property values of loaded objects | Discarded (curated; the tracker `mutable`) |
 | `Extbase\Service\CacheService`, `Extbase\Validation\ValidatorResolver` | Pending cache tags, validator conjunctions | Discarded (curated) |
 | `Form\Slot\FilePersistenceSlot`, `Form\Slot\ResourcePublicationSlot` | Allowed invocations and published file identifiers | Discarded (curated) |
 | `Adminpanel\Log\InMemoryLogWriter` | Log records of the current request | Discarded (curated) |
@@ -404,10 +407,31 @@ first use.
 | `Core\Resource\Rendering\RendererRegistry`, `Core\Resource\TextExtraction\TextExtractorRegistry`, `MetaTagManagerRegistry` | Registries of lazily collected instances (tagged iterators in v15) | Pinned together with the services they collect |
 | `Core\DataHandling\SoftReference\SoftReferenceParserFactory` | Pinned, but EXT:form's `FormPersistenceIdentifierSoftReferenceParser` holds the discarded `ResourceFactory` | Reported as `pin-conflict` and discarded |
 
+### Checked and safe
+
+New or reworked in v15 and safe in a worker:
+
+- `Core\Authentication\Pipeline\AuthenticatorManager` is readonly and holds
+  the authenticators through a service locator, which asks the container on
+  every call, so it never returns a discarded instance.
+- The module access gates (`AdminGate`, `UserGate`, `SystemMaintainerGate`)
+  get the user as an argument and keep no state. `ModuleAccessGateRegistry` is
+  still discarded because its `$gates` array is mutable; that only costs the
+  rebuild.
+- `Core\Resource\Driver\DriverRegistry` creates drivers through a factory
+  locator (`#[AsFileStorageDriver]`); its arrays hold class names registered at
+  boot.
+- `Extbase\Reflection\ReflectionService::$reflectionProperties` is a new
+  static, a process-wide cache of `ReflectionProperty` objects per class:
+  class metadata, not request data.
+- `Core\Cache\Flush\CacheFlusher`, `MailProfileResolver`, `FileDumpService`
+  and `PageDescendantsRepository` are readonly.
+
 ### Fixed in v15
 
 - `DataHandler::$recordsToClearCacheFor` / `$recordPidsForDeletedRecords` are
-  per instance; the resetter only resets them where they are still static (v14).
+  per instance and flushed through `CacheFlushDemand`; the resetter only resets
+  them where they are still static (v14).
 - `ConnectionPool::$connections` is no longer static.
 - `DocHeaderComponent`, `ButtonBar` and `MenuRegistry` are no longer shared.
 - `MetaTagManagerRegistry` dropped `SingletonInterface` (#110578), so it lives
